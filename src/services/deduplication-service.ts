@@ -66,7 +66,7 @@ export class DeduplicationService {
 
             for (const dup of toDelete) {
               try {
-                vectorSearch.deleteVector(db, dup.id);
+                await vectorSearch.deleteVector(db, dup.id, shard);
                 shardManager.decrementVectorCount(shard.id);
                 exactDeleted++;
               } catch (error) {

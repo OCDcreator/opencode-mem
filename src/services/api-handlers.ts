@@ -327,7 +327,7 @@ export async function handleAddMemory(data: {
       metadata: JSON.stringify({ source: "api" }),
     };
     const db = connectionManager.getConnection(shard.dbPath);
-    vectorSearch.insertVector(db, record, shard);
+    await vectorSearch.insertVector(db, record, shard);
     shardManager.incrementVectorCount(shard.id);
     return { success: true, data: { id } };
   } catch (error) {
@@ -436,7 +436,7 @@ export async function handleUpdateMemory(
       projectName: existingMemory.project_name,
       gitRepoUrl: existingMemory.git_repo_url,
     };
-    vectorSearch.insertVector(db, updatedRecord, foundShard);
+    await vectorSearch.insertVector(db, updatedRecord, foundShard);
     shardManager.incrementVectorCount(foundShard.id);
     return { success: true };
   } catch (error) {
@@ -1049,6 +1049,9 @@ export async function handleRunTagMigrationBatch(
         }
 
         const vector = await embeddingService.embedWithTimeout(m.content);
+        const tagsVector = currentTags.length
+          ? await embeddingService.embedWithTimeout(currentTags.join(", "))
+          : undefined;
         const vectorBuffer = new Uint8Array(vector.buffer);
         db.prepare("UPDATE memories SET vector = ?, updated_at = ? WHERE id = ?").run(
           vectorBuffer,
@@ -1056,10 +1059,7 @@ export async function handleRunTagMigrationBatch(
           m.id
         );
 
-        const index = vectorSearch
-          .getIndexManager()
-          .getIndex(shard.scope, shard.scopeHash, shard.shardIndex);
-        await index.insert(m.id, vector);
+        await vectorSearch.updateVector(db, m.id, vector, shard, tagsVector);
 
         migrationProgress.processed++;
         batchProcessed++;

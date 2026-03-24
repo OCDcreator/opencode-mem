@@ -157,7 +157,7 @@ export class MigrationService {
           currentShard: String(shardInfo.shardId),
         });
 
-        shardManager.deleteShard(shardInfo.shardId);
+        await shardManager.deleteShard(shardInfo.shardId);
         deletedShards++;
       } catch (error) {
         log("Migration: error deleting shard", {
@@ -248,7 +248,7 @@ export class MigrationService {
           });
         }
 
-        shardManager.deleteShard(shardInfo.shardId);
+        await shardManager.deleteShard(shardInfo.shardId);
 
         for (const memory of tempMemories) {
           try {
@@ -259,7 +259,7 @@ export class MigrationService {
             const newShard = shardManager.getWriteShard(scope, hash);
             const newDb = connectionManager.getConnection(newShard.dbPath);
 
-            vectorSearch.insertVector(
+            await vectorSearch.insertVector(
               newDb,
               {
                 id: memory.id,

@@ -99,6 +99,7 @@ export class AnthropicMessagesProvider extends BaseAIProvider {
 
         const requestBody = {
           model: this.config.model,
+          max_tokens: this.config.maxTokens ?? 4096,
           system: systemPrompt,
           messages,
           tools: [tool],

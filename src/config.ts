@@ -41,6 +41,10 @@ interface OpenCodeMemConfig {
   memoryApiUrl?: string;
   memoryApiKey?: string;
   memoryTemperature?: number | false;
+  memoryExtraParams?: Record<string, unknown>;
+  opencodeProvider?: string;
+  opencodeModel?: string;
+  vectorBackend?: "usearch-first" | "usearch" | "exact-scan";
   aiSessionRetentionDays?: number;
   webServerEnabled?: boolean;
   webServerPort?: number;
@@ -82,6 +86,9 @@ const DEFAULTS: Required<
     | "memoryApiKey"
     | "memoryProvider"
     | "memoryTemperature"
+    | "memoryExtraParams"
+    | "opencodeProvider"
+    | "opencodeModel"
     | "autoCaptureLanguage"
     | "userEmailOverride"
     | "userNameOverride"
@@ -94,6 +101,10 @@ const DEFAULTS: Required<
   memoryApiKey?: string;
   memoryProvider?: "openai-chat" | "openai-responses" | "anthropic";
   memoryTemperature?: number | false;
+  memoryExtraParams?: Record<string, unknown>;
+  opencodeProvider?: string;
+  opencodeModel?: string;
+  vectorBackend?: "usearch-first" | "usearch" | "exact-scan";
   autoCaptureLanguage?: string;
   userEmailOverride?: string;
   userNameOverride?: string;
@@ -109,6 +120,7 @@ const DEFAULTS: Required<
   autoCaptureEnabled: true,
   autoCaptureMaxIterations: 5,
   autoCaptureIterationTimeout: 30000,
+  vectorBackend: "usearch-first",
   aiSessionRetentionDays: 7,
   webServerEnabled: true,
   webServerPort: 4747,
@@ -226,12 +238,30 @@ const CONFIG_TEMPLATE = `{
   // Automatically detect and remove duplicate memories
   "deduplicationEnabled": true,
   
-  // Similarity threshold (0-1) for detecting duplicates (higher = stricter)
-  "deduplicationSimilarityThreshold": 0.90,
-  
-  // ============================================
-  // Auto-Capture Settings (REQUIRES EXTERNAL API)
-  // ============================================
+   // Similarity threshold (0-1) for detecting duplicates (higher = stricter)
+   "deduplicationSimilarityThreshold": 0.90,
+   
+   // ============================================
+   // OpenCode Provider Settings (RECOMMENDED)
+   // ============================================
+
+   // Use opencode's already-configured providers for auto-capture and user profile learning.
+   // When set, no separate API key is needed — uses your existing opencode authentication
+   // (including Claude Pro/Max plans via OAuth, or any API key configured in opencode).
+   //
+   // If NOT set, falls back to the manual config (memoryApiKey/memoryApiUrl/memoryModel below).
+   //
+   // Examples:
+   //   Anthropic (OAuth/API key): "opencodeProvider": "anthropic", "opencodeModel": "claude-haiku-4-5-20251001"
+   //   OpenAI (API key):          "opencodeProvider": "openai",     "opencodeModel": "gpt-4o-mini"
+   //
+   // The provider name must match a connected provider in opencode (check with: opencode providers list)
+   // "opencodeProvider": "anthropic",
+   // "opencodeModel": "claude-haiku-4-5-20251001",
+
+   // ============================================
+   // Auto-Capture Settings (REQUIRES EXTERNAL API)
+   // ============================================
   
   // IMPORTANT: Auto-capture ONLY works with external API
   // It runs in background without blocking your main session
@@ -290,6 +320,12 @@ const CONFIG_TEMPLATE = `{
   // Some reasoning models (like o1, o3, gpt-5) don't support temperature parameter
   // Set to false and add "memoryTemperature": false in config when using such models
   "memoryTemperature": 0.3,
+
+  // Extra parameters to include in API request body
+  // Useful for local inference servers (e.g. llama-server with --jinja) that support
+  // additional parameters like disabling thinking/reasoning mode
+  // Example for Qwen3 models: { "enable_thinking": false }
+  // "memoryExtraParams": {},
 
   // Language for auto-capture summaries (default: "auto" for auto-detection)
   // Options: "auto", "en", "id", "zh", "ja", "es", "fr", "de", "ru", "pt", "ar", "ko"
@@ -446,6 +482,13 @@ export const CONFIG = {
   memoryApiUrl: fileConfig.memoryApiUrl,
   memoryApiKey: resolveSecretValue(fileConfig.memoryApiKey),
   memoryTemperature: fileConfig.memoryTemperature,
+  memoryExtraParams: fileConfig.memoryExtraParams,
+  opencodeProvider: fileConfig.opencodeProvider,
+  opencodeModel: fileConfig.opencodeModel,
+  vectorBackend: (fileConfig.vectorBackend ?? "usearch-first") as
+    | "usearch-first"
+    | "usearch"
+    | "exact-scan",
   aiSessionRetentionDays: fileConfig.aiSessionRetentionDays ?? DEFAULTS.aiSessionRetentionDays,
   webServerEnabled: fileConfig.webServerEnabled ?? DEFAULTS.webServerEnabled,
   webServerPort: fileConfig.webServerPort ?? DEFAULTS.webServerPort,

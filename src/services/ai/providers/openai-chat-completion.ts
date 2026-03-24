@@ -1,4 +1,4 @@
-import { BaseAIProvider, type ToolCallResult } from "./base-provider.js";
+import { BaseAIProvider, type ToolCallResult, applySafeExtraParams } from "./base-provider.js";
 import { AISessionManager } from "../session/ai-session-manager.js";
 import type { ChatCompletionTool } from "../tools/tool-schema.js";
 import { log } from "../../logger.js";
@@ -173,6 +173,10 @@ export class OpenAIChatCompletionProvider extends BaseAIProvider {
 
         if (this.config.memoryTemperature !== false) {
           requestBody.temperature = this.config.memoryTemperature ?? 0.3;
+        }
+
+        if (this.config.extraParams) {
+          applySafeExtraParams(requestBody, this.config.extraParams);
         }
 
         const headers: Record<string, string> = {

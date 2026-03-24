@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { CONFIG } from "../../config.js";
 import { connectionManager } from "./connection-manager.js";
 import { log } from "../logger.js";
+import { vectorSearch } from "./vector-search.js";
 import type { ShardInfo } from "./types.js";
 
 const Database = getDatabase();
@@ -289,12 +290,22 @@ export class ShardManager {
     };
   }
 
-  deleteShard(shardId: number): void {
+  async deleteShard(shardId: number): Promise<void> {
     const stmt = this.metadataDb.prepare(`SELECT * FROM shards WHERE id = ?`);
     const row = stmt.get(shardId) as any;
 
     if (row) {
       const fullPath = this.resolveStoredPath(row.db_path, row.scope);
+      await vectorSearch.deleteShardIndexes({
+        id: row.id,
+        scope: row.scope,
+        scopeHash: row.scope_hash,
+        shardIndex: row.shard_index,
+        dbPath: fullPath,
+        vectorCount: row.vector_count,
+        isActive: row.is_active === 1,
+        createdAt: row.created_at,
+      });
       connectionManager.closeConnection(fullPath);
 
       try {

@@ -88,7 +88,7 @@ export class CleanupService {
               continue;
             }
 
-            vectorSearch.deleteVector(db, memory.id);
+            await vectorSearch.deleteVector(db, memory.id, shard);
             shardManager.decrementVectorCount(shard.id);
             totalDeleted++;
 

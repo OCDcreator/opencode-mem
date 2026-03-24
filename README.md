@@ -20,25 +20,21 @@ A persistent memory system for AI coding agents that enables long-term context r
 
 ## Core Features
 
-Local vector database with SQLite + HNSW (hnswlib-wasm), persistent project memories, automatic user profile learning, unified memory-prompt timeline, full-featured web UI, intelligent prompt-based memory extraction, multi-provider AI support (OpenAI, Anthropic), 12+ local embedding models, smart deduplication, and built-in privacy protection.
+Local vector database with SQLite + USearch-first vector indexing and ExactScan fallback, persistent project memories, automatic user profile learning, unified memory-prompt timeline, full-featured web UI, intelligent prompt-based memory extraction, multi-provider AI support (OpenAI, Anthropic), 12+ local embedding models, smart deduplication, and built-in privacy protection.
 
 ## Prerequisites
 
-This plugin uses `hnswlib-node` for fast vector similarity search, which requires native compilation. Ensure you have:
+This plugin uses `USearch` for preferred in-memory vector indexing with automatic ExactScan fallback. No custom SQLite build or browser runtime shim is required.
 
-**All platforms:**
+**Recommended runtime:**
 
-- Python 3.x
-- A C++ compiler (gcc, clang, or MSVC)
-- `make` or CMake
+- Bun
+- Standard OpenCode plugin environment
 
-**Platform-specific setup:**
+**Notes:**
 
-| Platform    | Requirements                                                                                                              |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **macOS**   | Xcode Command Line Tools: `xcode-select --install`                                                                        |
-| **Linux**   | Build essentials: `sudo apt install build-essential python3` (Debian/Ubuntu) or `sudo pacman -S base-devel python` (Arch) |
-| **Windows** | Visual Studio Build Tools with C++ workload, or Windows Build Tools: `npm install -g windows-build-tools`                 |
+- If `USearch` is unavailable or fails at runtime, the plugin automatically falls back to exact vector scanning.
+- SQLite remains the source of truth; search indexes are rebuilt from SQLite data when needed.
 
 ## Getting Started
 
@@ -78,11 +74,9 @@ Configure at `~/.config/opencode/opencode-mem.jsonc`:
 
   "autoCaptureEnabled": true,
   "autoCaptureLanguage": "auto",
-  "memoryProvider": "openai-chat",
-  "memoryModel": "gpt-4o-mini",
-  "memoryApiUrl": "https://api.openai.com/v1",
-  "memoryApiKey": "sk-...",
-  "memoryTemperature": 0.3,
+
+  "opencodeProvider": "anthropic",
+  "opencodeModel": "claude-haiku-4-5-20251001",
 
   "showAutoCaptureToasts": true,
   "showUserProfileToasts": true,
@@ -103,6 +97,28 @@ Configure at `~/.config/opencode/opencode-mem.jsonc`:
     "injectOn": "first",
   },
 }
+```
+
+### Auto-Capture AI Provider
+
+**Recommended:** Use opencode's built-in providers (no separate API key needed):
+
+```jsonc
+"opencodeProvider": "anthropic",
+"opencodeModel": "claude-haiku-4-5-20251001",
+```
+
+This leverages your existing opencode authentication (OAuth or API key). Works with Claude Pro/Max plans via OAuth - no individual API keys required.
+
+Supported providers: `anthropic`, `openai`
+
+**Fallback:** Manual API configuration (if not using opencodeProvider):
+
+```jsonc
+"memoryProvider": "openai-chat",
+"memoryModel": "gpt-4o-mini",
+"memoryApiUrl": "https://api.openai.com/v1",
+"memoryApiKey": "sk-...",
 ```
 
 **API Key Formats:**

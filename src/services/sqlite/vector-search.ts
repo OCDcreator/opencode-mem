@@ -1,17 +1,35 @@
 import { getDatabase } from "./sqlite-bootstrap.js";
 import { connectionManager } from "./connection-manager.js";
-import { HNSWIndexManager } from "./hnsw-index.js";
 import { log } from "../logger.js";
 import { CONFIG } from "../../config.js";
 import type { MemoryRecord, SearchResult, ShardInfo } from "./types.js";
+import { createVectorBackend } from "../vector-backends/backend-factory.js";
+import { ExactScanBackend } from "../vector-backends/exact-scan-backend.js";
+import type { VectorBackend } from "../vector-backends/types.js";
 
 const Database = getDatabase();
 type DatabaseType = typeof Database.prototype;
 
-const hnswIndexManager = new HNSWIndexManager(CONFIG.storagePath);
+function toBlob(vector?: Float32Array): Uint8Array | null {
+  return vector ? new Uint8Array(vector.buffer) : null;
+}
 
 export class VectorSearch {
-  insertVector(db: DatabaseType, record: MemoryRecord, shard?: ShardInfo): void {
+  private readonly backendPromise: Promise<VectorBackend>;
+  private readonly fallbackBackend: VectorBackend;
+
+  constructor(backend?: VectorBackend, fallbackBackend: VectorBackend = new ExactScanBackend()) {
+    this.backendPromise = backend
+      ? Promise.resolve(backend)
+      : createVectorBackend({ vectorBackend: CONFIG.vectorBackend });
+    this.fallbackBackend = fallbackBackend;
+  }
+
+  private async getBackend(): Promise<VectorBackend> {
+    return this.backendPromise;
+  }
+
+  async insertVector(db: DatabaseType, record: MemoryRecord, shard?: ShardInfo): Promise<void> {
     const insertMemory = db.prepare(`
       INSERT INTO memories (
         id, content, vector, tags_vector, container_tag, tags, type, created_at, updated_at,
@@ -19,14 +37,11 @@ export class VectorSearch {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const vectorBuffer = new Uint8Array(record.vector.buffer);
-    const tagsVectorBuffer = record.tagsVector ? new Uint8Array(record.tagsVector.buffer) : null;
-
     insertMemory.run(
       record.id,
       record.content,
-      vectorBuffer,
-      tagsVectorBuffer,
+      toBlob(record.vector),
+      toBlob(record.tagsVector),
       record.containerTag,
       record.tags || null,
       record.type || null,
@@ -41,26 +56,17 @@ export class VectorSearch {
       record.gitRepoUrl || null
     );
 
-    if (shard && record.vector) {
-      const contentIndex = hnswIndexManager.getIndex(
-        shard.scope,
-        shard.scopeHash,
-        shard.shardIndex
-      );
-      contentIndex.insert(record.id, record.vector).catch((err) => {
-        log("HNSW content insert error", { memoryId: record.id, error: String(err) });
-      });
-
-      if (record.tagsVector) {
-        const tagsIndex = hnswIndexManager.getTagsIndex(
-          shard.scope,
-          shard.scopeHash,
-          shard.shardIndex
-        );
-        tagsIndex.insert(record.id, record.tagsVector).catch((err) => {
-          log("HNSW tags insert error", { memoryId: record.id, error: String(err) });
-        });
+    try {
+      if (shard) {
+        const backend = await this.getBackend();
+        await backend.insert({ id: record.id, vector: record.vector, shard, kind: "content" });
+        if (record.tagsVector) {
+          await backend.insert({ id: record.id, vector: record.tagsVector, shard, kind: "tags" });
+        }
       }
+    } catch (error) {
+      db.prepare(`DELETE FROM memories WHERE id = ?`).run(record.id);
+      throw error;
     }
   }
 
@@ -72,17 +78,52 @@ export class VectorSearch {
     queryText?: string
   ): Promise<SearchResult[]> {
     const db = connectionManager.getConnection(shard.dbPath);
-    const contentIndex = hnswIndexManager.getIndex(shard.scope, shard.scopeHash, shard.shardIndex);
-    const tagsIndex = hnswIndexManager.getTagsIndex(shard.scope, shard.scopeHash, shard.shardIndex);
+    const backend = await this.getBackend();
+    let contentResults;
+    let tagsResults;
 
-    // HNSW indexes are in-memory only (hnswlib-wasm has no real FS bridging).
-    // Auto-rebuild from SQLite vectors if indexes are empty after process restart.
-    if (!contentIndex.isPopulated()) {
-      await hnswIndexManager.rebuildFromShard(db, shard.scope, shard.scopeHash, shard.shardIndex);
+    try {
+      await backend.rebuildFromShard({ db, shard, kind: "content" });
+      await backend.rebuildFromShard({ db, shard, kind: "tags" });
+
+      contentResults = await backend.search({
+        db,
+        shard,
+        kind: "content",
+        queryVector,
+        limit: limit * 4,
+      });
+      tagsResults = await backend.search({
+        db,
+        shard,
+        kind: "tags",
+        queryVector,
+        limit: limit * 4,
+      });
+    } catch (error) {
+      log("Vector search degraded to exact scan in shard", {
+        shardId: shard.id,
+        backend: backend.getBackendName(),
+        error: String(error),
+      });
+
+      await this.fallbackBackend.rebuildFromShard({ db, shard, kind: "content" });
+      await this.fallbackBackend.rebuildFromShard({ db, shard, kind: "tags" });
+      contentResults = await this.fallbackBackend.search({
+        db,
+        shard,
+        kind: "content",
+        queryVector,
+        limit: limit * 4,
+      });
+      tagsResults = await this.fallbackBackend.search({
+        db,
+        shard,
+        kind: "tags",
+        queryVector,
+        limit: limit * 4,
+      });
     }
-
-    const contentResults = await contentIndex.search(queryVector, limit * 4);
-    const tagsResults = await tagsIndex.search(queryVector, limit * 4);
 
     const scoreMap = new Map<string, { contentSim: number; tagsSim: number }>();
 
@@ -106,7 +147,7 @@ export class VectorSearch {
     const rows = db
       .prepare(
         `
-      SELECT * FROM memories 
+      SELECT * FROM memories
       WHERE id IN (${placeholders}) AND container_tag = ?
     `
       )
@@ -119,7 +160,7 @@ export class VectorSearch {
           .filter((w) => w.length > 1)
       : [];
 
-    return rows.map((row: any) => {
+    const hydratedResults = rows.map((row: any) => {
       const scores = scoreMap.get(row.id)!;
       const memoryTagsStr = row.tags || "";
       const memoryTags = memoryTagsStr.split(",").map((t: string) => t.trim().toLowerCase());
@@ -151,6 +192,9 @@ export class VectorSearch {
         isPinned: row.is_pinned,
       };
     });
+
+    hydratedResults.sort((a, b) => b.similarity - a.similarity);
+    return hydratedResults;
   }
 
   async searchAcrossShards(
@@ -181,17 +225,9 @@ export class VectorSearch {
     db.prepare(`DELETE FROM memories WHERE id = ?`).run(memoryId);
 
     if (shard) {
-      const contentIndex = hnswIndexManager.getIndex(
-        shard.scope,
-        shard.scopeHash,
-        shard.shardIndex
-      );
-      const tagsIndex = hnswIndexManager.getTagsIndex(
-        shard.scope,
-        shard.scopeHash,
-        shard.shardIndex
-      );
-      await Promise.all([contentIndex.delete(memoryId), tagsIndex.delete(memoryId)]);
+      const backend = await this.getBackend();
+      await backend.delete({ id: memoryId, shard, kind: "content" });
+      await backend.delete({ id: memoryId, shard, kind: "tags" });
     }
   }
 
@@ -202,36 +238,26 @@ export class VectorSearch {
     shard?: ShardInfo,
     tagsVector?: Float32Array
   ): Promise<void> {
-    const vectorBuffer = new Uint8Array(vector.buffer);
-    const tagsVectorBuffer = tagsVector ? new Uint8Array(tagsVector.buffer) : null;
     db.prepare(`UPDATE memories SET vector = ?, tags_vector = ? WHERE id = ?`).run(
-      vectorBuffer,
-      tagsVectorBuffer,
+      toBlob(vector),
+      toBlob(tagsVector),
       memoryId
     );
 
-    if (shard && vector) {
-      const contentIndex = hnswIndexManager.getIndex(
-        shard.scope,
-        shard.scopeHash,
-        shard.shardIndex
-      );
-      await contentIndex.insert(memoryId, vector);
-
+    if (shard) {
+      const backend = await this.getBackend();
+      await backend.insert({ id: memoryId, vector, shard, kind: "content" });
       if (tagsVector) {
-        const tagsIndex = hnswIndexManager.getTagsIndex(
-          shard.scope,
-          shard.scopeHash,
-          shard.shardIndex
-        );
-        await tagsIndex.insert(memoryId, tagsVector);
+        await backend.insert({ id: memoryId, vector: tagsVector, shard, kind: "tags" });
+      } else {
+        await backend.delete({ id: memoryId, shard, kind: "tags" });
       }
     }
   }
 
   listMemories(db: DatabaseType, containerTag: string, limit: number): any[] {
     const stmt = db.prepare(`
-      SELECT * FROM memories 
+      SELECT * FROM memories
       WHERE container_tag = ?
       ORDER BY created_at DESC
       LIMIT ?
@@ -252,7 +278,7 @@ export class VectorSearch {
 
   getMemoriesBySessionID(db: DatabaseType, sessionID: string): any[] {
     const stmt = db.prepare(`
-      SELECT * FROM memories 
+      SELECT * FROM memories
       WHERE metadata LIKE ?
       ORDER BY created_at DESC
     `);
@@ -280,7 +306,7 @@ export class VectorSearch {
 
   getDistinctTags(db: DatabaseType): any[] {
     const stmt = db.prepare(`
-      SELECT DISTINCT 
+      SELECT DISTINCT
         container_tag,
         display_name,
         user_name,
@@ -303,17 +329,30 @@ export class VectorSearch {
     stmt.run(memoryId);
   }
 
-  async rebuildHNSWIndex(
+  async rebuildIndexForShard(
     db: DatabaseType,
     scope: string,
     scopeHash: string,
     shardIndex: number
   ): Promise<void> {
-    await hnswIndexManager.rebuildFromShard(db, scope, scopeHash, shardIndex);
+    const backend = await this.getBackend();
+    const shard = {
+      id: 0,
+      scope: scope as "user" | "project",
+      scopeHash,
+      shardIndex,
+      dbPath: "",
+      vectorCount: 0,
+      isActive: true,
+      createdAt: Date.now(),
+    };
+    await backend.rebuildFromShard({ db, shard, kind: "content" });
+    await backend.rebuildFromShard({ db, shard, kind: "tags" });
   }
 
-  getIndexManager(): HNSWIndexManager {
-    return hnswIndexManager;
+  async deleteShardIndexes(shard: ShardInfo): Promise<void> {
+    const backend = await this.getBackend();
+    await backend.deleteShardIndexes({ shard });
   }
 }
 

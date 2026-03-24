@@ -195,7 +195,7 @@ export class LocalMemoryClient {
       };
 
       const db = connectionManager.getConnection(shard.dbPath);
-      vectorSearch.insertVector(db, record, shard);
+      await vectorSearch.insertVector(db, record, shard);
       shardManager.incrementVectorCount(shard.id);
 
       return { success: true as const, id };
