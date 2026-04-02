@@ -1,6 +1,6 @@
 {
   "name": "opencode-mem",
-  "version": "2.12.0-custom",
+  "version": "2.12.1-custom",
   "description": "OpenCode plugin that gives coding agents persistent memory using local vector database (custom fork with improved memory injection)",
   "type": "module",
   "main": "dist/plugin.js",
