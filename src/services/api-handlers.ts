@@ -100,7 +100,6 @@ function getProjectPathFromTag(tag: string): string | undefined {
 
 export async function handleListTags(): Promise<ApiResponse<{ project: TagInfo[] }>> {
   try {
-    await embeddingService.warmup();
     const projectShards = shardManager.getAllShards("project", "");
     const tagsMap = new Map<string, TagInfo>();
     for (const shard of projectShards) {
@@ -140,7 +139,6 @@ export async function handleListMemories(
   includePrompts: boolean = true
 ): Promise<ApiResponse<PaginatedResponse<Memory | any>>> {
   try {
-    await embeddingService.warmup();
     let allMemories: any[] = [];
     if (tag) {
       const { scope: tagScope, hash } = extractScopeFromTag(tag);
@@ -652,7 +650,6 @@ export async function handleStats(): Promise<
   }>
 > {
   try {
-    await embeddingService.warmup();
     const projectShards = shardManager.getAllShards("project", "");
     let userCount = 0,
       projectCount = 0;

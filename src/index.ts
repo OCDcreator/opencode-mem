@@ -15,7 +15,7 @@ import { isConfigured, CONFIG, initConfig } from "./config.js";
 import { log } from "./services/logger.js";
 import type { MemoryType } from "./types/index.js";
 import { getLanguageName } from "./services/language-detector.js";
-import { setStatePath, setConnectedProviders } from "./services/ai/opencode-provider.js";
+import { setStatePath, setConnectedProviders } from "./services/ai/opencode-state.js";
 
 export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
@@ -30,12 +30,14 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   const GLOBAL_PLUGIN_WARMUP_KEY = Symbol.for("opencode-mem.plugin.warmedup");
 
   if (!(globalThis as any)[GLOBAL_PLUGIN_WARMUP_KEY] && isConfigured()) {
-    try {
-      await memoryClient.warmup();
-      (globalThis as any)[GLOBAL_PLUGIN_WARMUP_KEY] = true;
-    } catch (error) {
-      log("Plugin warmup failed", { error: String(error) });
-    }
+    (async () => {
+      try {
+        await memoryClient.warmup();
+        (globalThis as any)[GLOBAL_PLUGIN_WARMUP_KEY] = true;
+      } catch (error) {
+        log("Plugin warmup failed", { error: String(error) });
+      }
+    })();
   }
 
   // Wire opencode state path and provider list — fire-and-forget to avoid blocking init
@@ -272,11 +274,6 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
             });
           }
 
-          const needsWarmup = !(await memoryClient.isReady());
-          if (needsWarmup) {
-            return JSON.stringify({ success: false, error: "Memory system is initializing." });
-          }
-
           const mode = args.mode || "help";
           const langName = getLanguageName(CONFIG.autoCaptureLanguage || "en");
 
@@ -307,6 +304,7 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
               case "add":
                 if (!args.content)
                   return JSON.stringify({ success: false, error: "content required" });
+                await memoryClient.warmup();
                 const sanitizedContent = stripPrivateContent(args.content);
                 if (isFullyPrivate(args.content))
                   return JSON.stringify({ success: false, error: "Private content blocked" });
@@ -333,6 +331,7 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
               case "search":
                 if (!args.query) return JSON.stringify({ success: false, error: "query required" });
+                await memoryClient.warmup();
                 const searchRes = await memoryClient.searchMemories(args.query, tags.project.tag);
                 if (!searchRes.success)
                   return JSON.stringify({ success: false, error: searchRes.error });

@@ -1,257 +1,242 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { generateText, Output } from "ai";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import type { ZodType } from "zod";
+import { stripJsoncComments } from "../jsonc.js";
+import { log } from "../logger.js";
+export {
+  getStatePath,
+  isProviderConnected,
+  setConnectedProviders,
+  setStatePath,
+} from "./opencode-state.js";
 
-type OAuthAuth = { type: "oauth"; refresh: string; access: string; expires: number };
-type ApiAuth = { type: "api"; key: string };
-type Auth = OAuthAuth | ApiAuth;
-
-// --- State (set from plugin init in index.ts, Task 4) ---
-let _statePath: string | null = null;
-let _connectedProviders: string[] = [];
-
-export function setStatePath(path: string): void {
-  _statePath = path;
-}
-
-export function getStatePath(): string {
-  if (!_statePath) {
-    throw new Error("opencode state path not initialized. Plugin may not be fully started.");
-  }
-  return _statePath;
-}
-
-export function setConnectedProviders(providers: string[]): void {
-  _connectedProviders = providers;
-}
-
-export function isProviderConnected(providerName: string): boolean {
-  return _connectedProviders.includes(providerName);
-}
-
-// --- Auth ---
-function findAuthJsonPath(statePath: string): string | undefined {
-  const candidates = [
-    join(statePath, "auth.json"),
-    join(dirname(statePath), "share", "opencode", "auth.json"),
-    join(statePath.replace("/state/", "/share/"), "auth.json"),
-  ];
-  return candidates.find(existsSync);
-}
-
-export function readOpencodeAuth(statePath: string, providerName: string): Auth {
-  const authPath = findAuthJsonPath(statePath);
-  let raw: string | undefined;
-  if (authPath) {
-    try {
-      raw = readFileSync(authPath, "utf-8");
-    } catch {}
-  }
-  if (!raw || !authPath) {
-    throw new Error(
-      `opencode auth.json not found at ${authPath ?? statePath}. Is opencode authenticated?`
-    );
-  }
-  let parsed: Record<string, Auth>;
-  try {
-    parsed = JSON.parse(raw) as Record<string, Auth>;
-  } catch {
-    throw new Error(`Failed to read opencode auth.json: invalid JSON`);
-  }
-  const auth = parsed[providerName];
-  if (!auth) {
-    const connected = Object.keys(parsed).join(", ") || "none";
-    throw new Error(
-      `Provider '${providerName}' not found in opencode auth.json. Connected providers: ${connected}`
-    );
-  }
-  return auth;
-}
-
-// --- OAuth Fetch ---
-const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
-const OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token";
-const OAUTH_REQUIRED_BETAS = ["oauth-2025-04-20", "interleaved-thinking-2025-05-14"];
-const MCP_TOOL_PREFIX = "mcp_";
-
-export function createOAuthFetch(
-  statePath: string,
-  providerName: string
-): (input: string | Request | URL, init?: RequestInit) => Promise<Response> {
-  return async (input: string | Request | URL, init?: RequestInit): Promise<Response> => {
-    let auth = readOpencodeAuth(statePath, providerName) as OAuthAuth;
-
-    // Refresh token if expired
-    if (!auth.access || auth.expires < Date.now()) {
-      const refreshResponse = await fetch(OAUTH_TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "refresh_token",
-          refresh_token: auth.refresh,
-          client_id: OAUTH_CLIENT_ID,
-        }),
-      });
-      if (!refreshResponse.ok) {
-        throw new Error(`OAuth token refresh failed: ${refreshResponse.status}`);
-      }
-      const json = (await refreshResponse.json()) as {
-        access_token: string;
-        refresh_token: string;
-        expires_in: number;
-      };
-      auth = {
-        type: "oauth",
-        refresh: json.refresh_token,
-        access: json.access_token,
-        expires: Date.now() + json.expires_in * 1000,
-      };
-
-      const authPath = findAuthJsonPath(statePath);
-      if (authPath) {
-        try {
-          const allAuth = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, Auth>;
-          allAuth[providerName] = auth;
-          writeFileSync(authPath, JSON.stringify(allAuth));
-        } catch {}
-      }
-    }
-
-    // Build headers
-    const requestInit = init ?? {};
-    const requestHeaders = new Headers();
-    if (input instanceof Request) {
-      input.headers.forEach((value, key) => requestHeaders.set(key, value));
-    }
-    if (requestInit.headers) {
-      if (requestInit.headers instanceof Headers) {
-        requestInit.headers.forEach((value, key) => requestHeaders.set(key, value));
-      } else if (Array.isArray(requestInit.headers)) {
-        for (const pair of requestInit.headers) {
-          const [key, value] = pair as [string, string];
-          if (typeof value !== "undefined") requestHeaders.set(key, value);
-        }
-      } else {
-        for (const [key, value] of Object.entries(requestInit.headers as Record<string, string>)) {
-          if (typeof value !== "undefined") requestHeaders.set(key, String(value));
-        }
-      }
-    }
-
-    // Merge beta headers
-    const incomingBeta = requestHeaders.get("anthropic-beta") ?? "";
-    const incomingBetas = incomingBeta
-      .split(",")
-      .map((b) => b.trim())
-      .filter(Boolean);
-    const mergedBetas = [...new Set([...OAUTH_REQUIRED_BETAS, ...incomingBetas])].join(",");
-
-    requestHeaders.set("authorization", `Bearer ${auth.access}`);
-    requestHeaders.set("anthropic-beta", mergedBetas);
-    requestHeaders.set("user-agent", "claude-cli/2.1.2 (external, cli)");
-    requestHeaders.delete("x-api-key");
-
-    // Prefix tool names in request body
-    let body = requestInit.body;
-    if (body && typeof body === "string") {
-      try {
-        const parsed = JSON.parse(body) as Record<string, unknown>;
-        if (parsed.tools && Array.isArray(parsed.tools)) {
-          parsed.tools = (parsed.tools as Array<Record<string, unknown>>).map((tool) => ({
-            ...tool,
-            name: tool.name ? `${MCP_TOOL_PREFIX}${tool.name as string}` : tool.name,
-          }));
-        }
-        if (parsed.messages && Array.isArray(parsed.messages)) {
-          parsed.messages = (parsed.messages as Array<Record<string, unknown>>).map((msg) => {
-            if (msg.content && Array.isArray(msg.content)) {
-              msg.content = (msg.content as Array<Record<string, unknown>>).map((block) => {
-                if (block.type === "tool_use" && block.name) {
-                  return { ...block, name: `${MCP_TOOL_PREFIX}${block.name as string}` };
-                }
-                return block;
-              });
-            }
-            return msg;
-          });
-        }
-        body = JSON.stringify(parsed);
-      } catch {}
-    }
-
-    // Modify URL: add ?beta=true to /v1/messages
-    let requestInput: string | Request | URL = input;
-    try {
-      let requestUrl: URL | null = null;
-      if (typeof input === "string" || input instanceof URL) {
-        requestUrl = new URL(input.toString());
-      } else if (input instanceof Request) {
-        requestUrl = new URL(input.url);
-      }
-      if (requestUrl?.pathname === "/v1/messages" && !requestUrl.searchParams.has("beta")) {
-        requestUrl.searchParams.set("beta", "true");
-        requestInput =
-          input instanceof Request ? new Request(requestUrl.toString(), input) : requestUrl;
-      }
-    } catch {}
-
-    const response = await fetch(requestInput, { ...requestInit, body, headers: requestHeaders });
-
-    // Strip mcp_ prefix from tool names in streaming response
-    if (response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        async pull(controller) {
-          const { done, value } = await reader.read();
-          if (done) {
-            controller.close();
-            return;
-          }
-          let text = decoder.decode(value, { stream: true });
-          text = text.replace(/"name"\s*:\s*"mcp_([^"]+)"/g, '"name": "$1"');
-          controller.enqueue(encoder.encode(text));
-        },
-      });
-      return new Response(stream, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-      });
-    }
-
-    return response;
+interface OpencodeProviderConfig {
+  npm?: string;
+  options?: {
+    apiKey?: string;
+    baseURL?: string;
+    baseUrl?: string;
+    [key: string]: unknown;
   };
+  models?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
-// --- Provider ---
-export function createOpencodeAIProvider(providerName: string, auth: Auth, statePath?: string) {
-  if (providerName === "anthropic") {
-    if (auth.type === "oauth") {
-      if (!statePath) throw new Error("statePath is required for OAuth authentication");
-      return createAnthropic({
-        apiKey: "",
-        fetch: createOAuthFetch(statePath, providerName) as unknown as typeof globalThis.fetch,
-      });
-    }
-    return createAnthropic({ apiKey: auth.key });
-  }
-  if (providerName === "openai") {
-    if (auth.type === "oauth") {
-      throw new Error("OpenAI does not support OAuth authentication. Use an API key instead.");
-    }
-    return createOpenAI({ apiKey: auth.key });
-  }
-  throw new Error(
-    `Unsupported opencode provider: '${providerName}'. Supported providers: anthropic, openai`
-  );
+interface OpencodeConfigFile {
+  provider?: Record<string, OpencodeProviderConfig>;
 }
 
-// --- Structured Output ---
+function findOpencodeConfigPath(statePath: string): string | undefined {
+  const candidates = [
+    statePath,
+    join(statePath, "opencode.json"),
+    join(statePath, "opencode.jsonc"),
+    join(dirname(statePath), "opencode.json"),
+    join(dirname(statePath), "opencode.jsonc"),
+    join(homedir(), ".config", "opencode", "opencode.json"),
+    join(homedir(), ".config", "opencode", "opencode.jsonc"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+function loadOpencodeConfig(statePath: string): OpencodeConfigFile {
+  const configPath = findOpencodeConfigPath(statePath);
+  if (!configPath) {
+    throw new Error(`opencode config not found near ${statePath}`);
+  }
+
+  try {
+    const raw = readFileSync(configPath, "utf-8");
+    return JSON.parse(stripJsoncComments(raw)) as OpencodeConfigFile;
+  } catch (error) {
+    throw new Error(`Failed to read opencode config at ${configPath}: ${String(error)}`);
+  }
+}
+
+function getProviderConfig(statePath: string, providerName: string): OpencodeProviderConfig {
+  const config = loadOpencodeConfig(statePath);
+  const provider = config.provider?.[providerName];
+
+  if (!provider) {
+    const available = Object.keys(config.provider ?? {}).join(", ") || "none";
+    throw new Error(
+      `Provider '${providerName}' not found in opencode config. Available providers: ${available}`
+    );
+  }
+
+  return provider;
+}
+
+function getBaseUrl(provider: OpencodeProviderConfig): string {
+  const baseUrl = provider.options?.baseURL ?? provider.options?.baseUrl;
+  if (typeof baseUrl !== "string" || !baseUrl.trim()) {
+    throw new Error("Provider baseURL is missing in opencode config");
+  }
+  return baseUrl.replace(/\/+$/, "");
+}
+
+function getApiKey(provider: OpencodeProviderConfig): string | undefined {
+  const apiKey = provider.options?.apiKey;
+  return typeof apiKey === "string" && apiKey.trim() ? apiKey : undefined;
+}
+
+function inferProviderKind(
+  providerName: string,
+  provider: OpencodeProviderConfig
+): "anthropic" | "openai-compatible" {
+  const npmName = String(provider.npm ?? "").toLowerCase();
+  const name = providerName.toLowerCase();
+
+  if (npmName.includes("anthropic") || name.includes("anthropic")) {
+    return "anthropic";
+  }
+
+  return "openai-compatible";
+}
+
+function extractJsonString(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("Model returned empty content");
+  }
+
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fenced?.[1]) {
+    return fenced[1].trim();
+  }
+
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    return trimmed.slice(firstBrace, lastBrace + 1);
+  }
+
+  throw new Error("Could not extract JSON object from model response");
+}
+
+async function callOpenAICompatible<T>(options: {
+  provider: OpencodeProviderConfig;
+  modelId: string;
+  systemPrompt: string;
+  userPrompt: string;
+  schema: ZodType<T>;
+  temperature?: number;
+}): Promise<T> {
+  const url = `${getBaseUrl(options.provider)}/chat/completions`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  const apiKey = getApiKey(options.provider);
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`;
+  }
+
+  const instructions =
+    `${options.systemPrompt}\n\n` +
+    "Return ONLY a valid JSON object that matches the requested structure. Do not use markdown fences.";
+
+  const requestBody: Record<string, unknown> = {
+    model: options.modelId,
+    messages: [
+      { role: "system", content: instructions },
+      { role: "user", content: options.userPrompt },
+    ],
+    response_format: { type: "json_object" },
+  };
+
+  if (options.temperature !== undefined) {
+    requestBody.temperature = options.temperature;
+  }
+
+  let response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok && response.status === 400) {
+    const fallbackBody = { ...requestBody };
+    delete fallbackBody.response_format;
+    response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(fallbackBody),
+    });
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Provider request failed: ${response.status} - ${errorText}`);
+  }
+
+  const data = (await response.json()) as any;
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string") {
+    throw new Error("Provider returned no text content");
+  }
+
+  return options.schema.parse(JSON.parse(extractJsonString(content)));
+}
+
+async function callAnthropic<T>(options: {
+  provider: OpencodeProviderConfig;
+  modelId: string;
+  systemPrompt: string;
+  userPrompt: string;
+  schema: ZodType<T>;
+  temperature?: number;
+}): Promise<T> {
+  const url = `${getBaseUrl(options.provider)}/messages`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+  const apiKey = getApiKey(options.provider);
+  if (apiKey) {
+    headers["x-api-key"] = apiKey;
+  }
+
+  const requestBody: Record<string, unknown> = {
+    model: options.modelId,
+    max_tokens: 4096,
+    system:
+      `${options.systemPrompt}\n\n` +
+      "Return ONLY a valid JSON object that matches the requested structure. Do not use markdown fences.",
+    messages: [{ role: "user", content: options.userPrompt }],
+  };
+
+  if (options.temperature !== undefined) {
+    requestBody.temperature = options.temperature;
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(requestBody),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => response.statusText);
+    throw new Error(`Provider request failed: ${response.status} - ${errorText}`);
+  }
+
+  const data = (await response.json()) as any;
+  const content = Array.isArray(data?.content)
+    ? data.content
+        .filter((block: any) => block?.type === "text" && typeof block.text === "string")
+        .map((block: any) => block.text)
+        .join("\n")
+    : "";
+
+  if (!content) {
+    throw new Error("Provider returned no text content");
+  }
+
+  return options.schema.parse(JSON.parse(extractJsonString(content)));
+}
+
 export async function generateStructuredOutput<T>(options: {
   providerName: string;
   modelId: string;
@@ -261,14 +246,21 @@ export async function generateStructuredOutput<T>(options: {
   schema: ZodType<T>;
   temperature?: number;
 }): Promise<T> {
-  const auth = readOpencodeAuth(options.statePath, options.providerName);
-  const provider = createOpencodeAIProvider(options.providerName, auth, options.statePath);
-  const result = await generateText({
-    model: provider(options.modelId),
-    system: options.systemPrompt,
-    prompt: options.userPrompt,
-    output: Output.object({ schema: options.schema }),
-    temperature: options.temperature ?? 0.3,
-  });
-  return result.output as T;
+  const provider = getProviderConfig(options.statePath, options.providerName);
+  const providerKind = inferProviderKind(options.providerName, provider);
+
+  try {
+    if (providerKind === "anthropic") {
+      return await callAnthropic({ ...options, provider });
+    }
+
+    return await callOpenAICompatible({ ...options, provider });
+  } catch (error) {
+    log("generateStructuredOutput failed", {
+      providerName: options.providerName,
+      modelId: options.modelId,
+      error: String(error),
+    });
+    throw error;
+  }
 }

@@ -1,15 +1,19 @@
-import { pipeline, env } from "@xenova/transformers";
 import { CONFIG } from "../config.js";
 import { log } from "./logger.js";
 import { join } from "node:path";
 
-env.allowLocalModels = true;
-env.allowRemoteModels = true;
-env.cacheDir = join(CONFIG.storagePath, ".cache");
-
 const TIMEOUT_MS = 30000;
 const GLOBAL_EMBEDDING_KEY = Symbol.for("opencode-mem.embedding.instance");
 const MAX_CACHE_SIZE = 100;
+
+type TransformersModule = {
+  pipeline: (task: string, model: string, options?: Record<string, unknown>) => Promise<any>;
+  env: {
+    allowLocalModels: boolean;
+    allowRemoteModels: boolean;
+    cacheDir: string;
+  };
+};
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -21,6 +25,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 export class EmbeddingService {
   private pipe: any = null;
   private initPromise: Promise<void> | null = null;
+  private transformersPromise: Promise<TransformersModule> | null = null;
   public isWarmedUp: boolean = false;
   private cache: Map<string, Float32Array> = new Map();
   private cachedModelName: string | null = null;
@@ -45,6 +50,7 @@ export class EmbeddingService {
         this.isWarmedUp = true;
         return;
       }
+      const { pipeline } = await this.getTransformers();
       this.pipe = await pipeline("feature-extraction", CONFIG.embeddingModel, {
         progress_callback: progressCallback,
       });
@@ -113,6 +119,25 @@ export class EmbeddingService {
 
   clearCache(): void {
     this.cache.clear();
+  }
+
+  private async getTransformers(): Promise<TransformersModule> {
+    if (!this.transformersPromise) {
+      this.transformersPromise = import("@xenova/transformers")
+        .then((module) => {
+          const transformers = module as unknown as TransformersModule;
+          transformers.env.allowLocalModels = true;
+          transformers.env.allowRemoteModels = true;
+          transformers.env.cacheDir = join(CONFIG.storagePath, ".cache");
+          return transformers;
+        })
+        .catch((error) => {
+          this.transformersPromise = null;
+          throw error;
+        });
+    }
+
+    return this.transformersPromise;
   }
 }
 

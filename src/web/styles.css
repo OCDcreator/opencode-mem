@@ -30,6 +30,7 @@ body {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 10px;
+  gap: 16px;
 }
 
 .title {
@@ -40,27 +41,70 @@ body {
   margin: 0;
 }
 
-.github-link {
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.repo-links {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.repo-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 8px;
+  gap: 8px;
+  padding: 8px 14px;
   border: 1px solid #333;
-  background: #0a0a0a;
-  color: #00ff00;
+  background: linear-gradient(180deg, #171717 0%, #0a0a0a 100%);
+  color: #d9d9d9;
   text-decoration: none;
-  transition: all 0.2s;
+  transition:
+    transform 0.2s,
+    border-color 0.2s,
+    color 0.2s,
+    box-shadow 0.2s,
+    background 0.2s;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
 }
 
-.github-link:hover {
-  background: #00ff00;
+.repo-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.repo-link-upstream {
+  border-color: #2f5f73;
+  color: #7fdfff;
+}
+
+.repo-link-upstream:hover {
+  background: #7fdfff;
+  border-color: #7fdfff;
   color: #0a0a0a;
-  border-color: #00ff00;
 }
 
-.github-link .icon {
-  width: 20px;
-  height: 20px;
+.repo-link-fork {
+  border-color: #1f6b42;
+  color: #7effaa;
+}
+
+.repo-link-fork:hover {
+  background: #7effaa;
+  border-color: #7effaa;
+  color: #0a0a0a;
+}
+
+.repo-link .icon {
+  width: 16px;
+  height: 16px;
 }
 
 .stats-bar {
@@ -893,22 +937,27 @@ button:only-child .icon,
   }
 
   .header-top {
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .title {
     font-size: 14px;
   }
 
-  .github-link {
-    padding: 6px;
+  .header-actions {
+    justify-content: space-between;
+    flex-wrap: wrap;
   }
 
-  .github-link .icon {
-    width: 18px;
-    height: 18px;
+  .repo-links {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .repo-link {
+    flex: 1 1 140px;
+    justify-content: center;
   }
 
   .controls {

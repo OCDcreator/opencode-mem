@@ -17,16 +17,31 @@
       <header class="header">
         <div class="header-top">
           <h1 class="title" data-i18n="title">┌─ OPENCODE MEMORY EXPLORER ─┐</h1>
-          <button id="lang-toggle" class="lang-toggle" title="Switch Language">EN</button>
-          <a
-            href="https://github.com/tickernelz/opencode-mem"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="github-link"
-            title="View on GitHub"
-          >
-            <i data-lucide="github" class="icon"></i>
-          </a>
+          <div class="header-actions">
+            <button id="lang-toggle" class="lang-toggle" title="Switch Language">EN</button>
+            <div class="repo-links">
+              <a
+                href="https://github.com/tickernelz/opencode-mem"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="repo-link repo-link-upstream"
+                title="View upstream repository"
+              >
+                <i data-lucide="git-branch" class="icon"></i>
+                <span>Upstream</span>
+              </a>
+              <a
+                href="https://github.com/OCDcreator/opencode-mem"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="repo-link repo-link-fork"
+                title="View custom fork repository"
+              >
+                <i data-lucide="git-fork" class="icon"></i>
+                <span>My Fork</span>
+              </a>
+            </div>
+          </div>
         </div>
         <div class="stats-bar">
           <span id="stats-total">Total: 0</span>
