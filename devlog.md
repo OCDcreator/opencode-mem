@@ -1,5 +1,69 @@
 # Development Log
 
+> **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
+> 当前最新更新：2026-04-03
+
+## 2026-04-03 — Trace Auto-Capture Idle Flow And Harden Provider Parsing
+
+### Changed files
+
+| File                                   | Change                                                                        |
+| -------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/index.ts`                         | Log incoming plugin events before idle auto-capture dispatch                  |
+| `src/services/auto-capture.ts`         | Add step-by-step tracing for prompt claim, message fetch, and AI summary flow |
+| `src/services/ai/opencode-provider.ts` | Ignore directory candidates and unwrap single-wrapper JSON responses          |
+| `AGENTS.md`                            | Document current runtime architecture and debugging path                      |
+| `devlog.md`                            | Record review notes and architectural implications                            |
+
+### 1. Review result
+
+The current working diff builds successfully with `bun run build`.
+
+No blocking compile issue was found in this review pass.
+
+The main residual risk is operational rather than structural: the new debug
+logs intentionally persist prompt/provider snippets into the local log file for
+diagnosis, so that log should now be treated as sensitive local debugging data.
+
+### 2. Idle-driven auto-capture is now traceable
+
+`src/index.ts` now records each received plugin event before checking for
+`session.idle`.
+
+`src/services/auto-capture.ts` now logs the major phases of the capture
+pipeline:
+
+- finding the last uncaptured prompt
+- claiming that prompt
+- fetching OpenCode session messages
+- extracting assistant text/tool output
+- generating the structured summary
+- writing the memory record
+
+This makes it much easier to debug why a prompt was not captured without having
+to guess which stage failed.
+
+### 3. OpenCode provider parsing is more tolerant
+
+`src/services/ai/opencode-provider.ts` now verifies that candidate config paths
+are actual files before attempting to read them. This matters because the
+OpenCode state path may resolve to a directory-like location in some runtime
+layouts.
+
+The OpenAI-compatible parsing path now also unwraps a single top-level object
+wrapper before `zod` validation. That keeps structured output working when a
+provider returns payloads like `{ "result": { ...actual schema... } }` instead
+of the schema object directly.
+
+### 4. Documentation follow-up
+
+`AGENTS.md` now explains the current runtime architecture more explicitly:
+
+- startup/bootstrap flow
+- `session.idle` auto-capture flow
+- provider structured-output flow
+- local logging and debugging caveats
+
 ## 2026-04-03 — Switch OpenCode Desktop To Local Plugin Mode
 
 ### Changed files

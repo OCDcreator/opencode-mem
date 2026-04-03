@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import type { ZodType } from "zod";
@@ -38,7 +38,13 @@ function findOpencodeConfigPath(statePath: string): string | undefined {
     join(homedir(), ".config", "opencode", "opencode.jsonc"),
   ];
 
-  return candidates.find((candidate) => existsSync(candidate));
+  return candidates.find((candidate) => {
+    try {
+      return existsSync(candidate) && statSync(candidate).isFile();
+    } catch {
+      return false;
+    }
+  });
 }
 
 function loadOpencodeConfig(statePath: string): OpencodeConfigFile {
@@ -177,7 +183,22 @@ async function callOpenAICompatible<T>(options: {
     throw new Error("Provider returned no text content");
   }
 
-  return options.schema.parse(JSON.parse(extractJsonString(content)));
+  log("callOpenAICompatible raw content", { content: content.slice(0, 500) });
+  let parsed = JSON.parse(extractJsonString(content));
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const keys = Object.keys(parsed);
+    const firstKey = keys[0];
+    if (
+      keys.length === 1 &&
+      firstKey &&
+      typeof parsed[firstKey] === "object" &&
+      parsed[firstKey] !== null
+    ) {
+      parsed = parsed[firstKey];
+    }
+  }
+  log("callOpenAICompatible parsed JSON", parsed);
+  return options.schema.parse(parsed);
 }
 
 async function callAnthropic<T>(options: {

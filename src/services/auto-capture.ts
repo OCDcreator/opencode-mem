@@ -22,43 +22,64 @@ export async function performAutoCapture(
   if (isCaptureRunning) return;
   isCaptureRunning = true;
   try {
+    log("AutoCapture: starting", { sessionID });
     const prompt = userPromptManager.getLastUncapturedPrompt(sessionID);
     if (!prompt) {
+      log("AutoCapture: no uncaptured prompt found", { sessionID });
       return;
     }
 
     if (!userPromptManager.claimPrompt(prompt.id)) {
+      log("AutoCapture: claim failed", { promptId: prompt.id });
       return;
     }
+    log("AutoCapture: prompt claimed", {
+      promptId: prompt.id,
+      content: prompt.content?.slice(0, 80),
+    });
 
     if (!ctx.client) {
+      log("AutoCapture: no client available");
       throw new Error("Client not available");
     }
 
+    log("AutoCapture: fetching messages", { sessionID });
     const response = await ctx.client.session.messages({
       path: { id: sessionID },
     });
 
     if (!response.data) {
+      log("AutoCapture: no response data from messages API");
       return;
     }
 
     const messages = response.data;
+    log("AutoCapture: messages received", { count: messages.length });
 
     const promptIndex = messages.findIndex((m: any) => m.info?.id === prompt.messageId);
     if (promptIndex === -1) {
+      log("AutoCapture: prompt message not found in history", {
+        promptMessageId: prompt.messageId,
+        messageIds: messages.map((m: any) => m.info?.id),
+      });
       return;
     }
 
     const aiMessages = messages.slice(promptIndex + 1);
 
     if (aiMessages.length === 0) {
+      log("AutoCapture: no AI messages after prompt");
       return;
     }
 
     const { textResponses, toolCalls } = extractAIContent(aiMessages);
+    log("AutoCapture: extracted content", {
+      textCount: textResponses.length,
+      toolCount: toolCalls.length,
+    });
 
     if (textResponses.length === 0 && toolCalls.length === 0) {
+      log("AutoCapture: no usable content extracted");
       return;
     }
 
@@ -67,12 +88,15 @@ export async function performAutoCapture(
 
     const context = buildMarkdownContext(prompt.content, textResponses, toolCalls, latestMemory);
 
+    log("AutoCapture: generating summary");
     const summaryResult = await generateSummary(context, sessionID, prompt.content);
 
     if (!summaryResult || summaryResult.type === "skip") {
+      log("AutoCapture: summary skipped", { summaryResult });
       userPromptManager.deletePrompt(prompt.id);
       return;
     }
+    log("AutoCapture: summary generated", { type: summaryResult.type, tags: summaryResult.tags });
 
     const result = await memoryClient.addMemory(summaryResult.summary, tags.project.tag, {
       source: "auto-capture" as any,
@@ -106,6 +130,8 @@ export async function performAutoCapture(
           .catch(() => {});
       }
     }
+  } catch (error) {
+    log("AutoCapture: ERROR", { error: String(error), stack: (error as any)?.stack });
   } finally {
     isCaptureRunning = false;
   }

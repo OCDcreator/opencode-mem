@@ -112,6 +112,48 @@ Practical rule:
 
 - Preserve both repository links unless the user explicitly wants a different header design.
 
+### 2.6 Auto-capture idle flow is now easier to trace
+
+Files:
+
+- `src/index.ts`
+- `src/services/auto-capture.ts`
+- `src/services/logger.ts`
+
+Important change:
+
+- Plugin events are now logged when received.
+- The auto-capture pipeline now logs each major step from prompt claim through summary generation.
+
+Why this matters:
+
+- Auto-capture failures were previously hard to localize.
+- Future debugging can now follow the actual idle-event path instead of guessing whether the failure happened before or after provider calls.
+
+Practical rule:
+
+- If auto-capture stops working, inspect the local log file first.
+- Treat those logs as sensitive local debugging data because they may contain prompt snippets and provider output excerpts.
+
+### 2.7 OpenAI-compatible provider parsing is more tolerant
+
+File: `src/services/ai/opencode-provider.ts`
+
+Important change:
+
+- Config-path discovery now filters candidates to actual files.
+- The OpenAI-compatible parser now unwraps a single wrapper object before `zod` validation.
+
+Why this matters:
+
+- `statePath` can point near the config without itself being the config file.
+- Some providers return a schema payload wrapped in one extra object such as `{ "result": { ... } }`.
+
+Practical rule:
+
+- Keep provider output schemas rooted at a JSON object.
+- If parsing fails, inspect the logged raw content before changing prompt/schema code.
+
 ## 3. Current Known-Good Runtime Configuration
 
 The current local environment is configured to use:
@@ -170,7 +212,83 @@ Notes:
 - The default remote host used by `@xenova/transformers` is Hugging Face.
 - If local mode fails with "Unable to connect", this is usually a model download/network problem, not necessarily a plugin logic problem.
 
-## 5. Auto-Capture / Memory Model Rules
+## 5. Current Runtime Architecture
+
+This section describes the current high-level runtime flow of the fork.
+
+### 5.1 Startup / bootstrap flow
+
+Primary file: `src/index.ts`
+
+Current behavior:
+
+- Plugin init calls `initConfig(directory)` and computes project/user tags.
+- Memory warmup is started in the background and should not block plugin startup.
+- OpenCode state path and connected provider list are fetched asynchronously and stored through `src/services/ai/opencode-state.ts`.
+- The web server is started independently when enabled.
+
+Why this matters:
+
+- Provider-backed features can fail if OpenCode has not exposed provider state yet.
+- A startup issue does not automatically mean embedding or web serving is broken; these paths are deliberately decoupled.
+
+### 5.2 Event-driven auto-capture flow
+
+Primary files:
+
+- `src/index.ts`
+- `src/services/auto-capture.ts`
+- `src/services/user-prompt/user-prompt-manager.ts`
+
+Current behavior:
+
+- Auto-capture starts from the `session.idle` plugin event.
+- `src/index.ts` debounces the idle event with a 10-second timeout before calling `performAutoCapture(...)`.
+- `performAutoCapture(...)` claims the newest uncaptured prompt, fetches session messages, extracts assistant text/tool content, builds markdown context, calls the configured summarizer, and writes the resulting memory.
+- Prompt rows use `captured = 2` as an in-progress claim state. On plugin startup, the prompt manager resets `captured = 2` back to `0`.
+- If the summarizer returns `type = "skip"`, the prompt is deleted rather than stored as a memory.
+
+Why this matters:
+
+- If `session.idle` never appears, auto-capture never starts.
+- If a prompt is claimed but not completed, restart behavior is part of the recovery path.
+
+### 5.3 Provider structured-output flow
+
+Primary files:
+
+- `src/services/ai/opencode-provider.ts`
+- `src/services/ai/opencode-state.ts`
+- `src/services/auto-capture.ts`
+- `src/services/user-memory-learning.ts`
+
+Current behavior:
+
+- Provider-backed structured output depends on `opencodeProvider + opencodeModel`.
+- The provider loader finds `opencode.json` / `opencode.jsonc` near the recorded OpenCode state path or in the default OpenCode config directory.
+- `generateStructuredOutput(...)` infers whether the provider should use the Anthropic or OpenAI-compatible HTTP path.
+- The OpenAI-compatible path now accepts either the direct schema object or a single wrapped object around that schema object.
+
+Why this matters:
+
+- Both auto-capture summaries and user-profile learning depend on this path.
+- A provider parse failure can be caused by config discovery, HTTP compatibility, or JSON wrapper shape; these are separate failure modes.
+
+### 5.4 Logging and debugging flow
+
+Primary file: `src/services/logger.ts`
+
+Current behavior:
+
+- Logs are written to `~/.opencode-mem/opencode-mem.log` unless `OPENCODE_MEM_LOG_FILE` overrides the destination.
+- New logs now include event names, auto-capture phase transitions, and OpenAI-compatible raw/parsed JSON excerpts.
+
+Why this matters:
+
+- The log file is now the first place to inspect when idle capture or provider parsing behaves unexpectedly.
+- The log file may contain prompt snippets or model-returned content, so handle it as local-sensitive debugging output.
+
+## 6. Auto-Capture / Memory Model Rules
 
 There are two different model families in this plugin:
 
@@ -193,9 +311,9 @@ Current active setup:
 "opencodeModel": "glm-4.5"
 ```
 
-## 6. OpenCode Installation Notes
+## 7. OpenCode Installation Notes
 
-### 6.1 Current preferred setup: local plugin mode
+### 7.1 Current preferred setup: local plugin mode
 
 This fork is now intended to be loaded as a **local plugin**, not as an npm plugin.
 
@@ -216,7 +334,7 @@ Why this matters:
 - npm plugin mode can cause OpenCode Desktop to reinstall or refresh a separate copy under cache.
 - local plugin mode avoids that extra copy and keeps development pointed at this working tree.
 
-### 6.2 Legacy npm/cache plugin behavior
+### 7.2 Legacy npm/cache plugin behavior
 
 Important local behavior discovered during debugging:
 
@@ -236,9 +354,9 @@ Practical rule:
 - Check the desktop logs for the exact plugin target path being loaded
 - If logs mention `~/.cache/opencode/node_modules/opencode-mem/dist/plugin.js`, Desktop is probably using the wrong copy again
 
-## 7. Operational Caveats
+## 8. Operational Caveats
 
-### 7.1 Vector dimension changes are destructive-ish
+### 8.1 Vector dimension changes are destructive-ish
 
 If embedding dimensions change:
 
@@ -248,7 +366,7 @@ If embedding dimensions change:
 
 Do not change embedding dimensions casually.
 
-### 7.2 Read-only UI endpoints should stay lightweight
+### 8.2 Read-only UI endpoints should stay lightweight
 
 Avoid adding embedding warmup to:
 
@@ -258,7 +376,7 @@ Avoid adding embedding warmup to:
 
 Otherwise the UI can become unavailable during model/network issues.
 
-### 7.3 Do not store plaintext secrets in committed docs
+### 8.3 Do not store plaintext secrets in committed docs
 
 Use:
 
@@ -267,15 +385,29 @@ Use:
 
 Avoid committing real API keys to the repository.
 
-## 8. Files Future Agents Should Inspect First
+### 8.4 Debug logs can contain prompt/model snippets
+
+Current behavior:
+
+- The local logger now stores short prompt snippets and provider output excerpts to help diagnose auto-capture/provider failures.
+
+Practical rule:
+
+- Do not paste or publish the log file casually.
+- If logs must be shared, sanitize them first.
+
+## 9. Files Future Agents Should Inspect First
 
 When working on this fork, start with:
 
 - `src/services/embedding.ts`
 - `src/index.ts`
 - `src/services/api-handlers.ts`
+- `src/services/auto-capture.ts`
 - `src/services/ai/opencode-provider.ts`
 - `src/services/ai/opencode-state.ts`
+- `src/services/user-prompt/user-prompt-manager.ts`
+- `src/services/logger.ts`
 - `src/config.ts`
 - `src/web/index.html`
 - `src/web/styles.css`
@@ -284,7 +416,7 @@ When working on this fork, start with:
 
 These files contain most of the fork-specific behavior changes.
 
-## 9. Recommended Verification Checklist
+## 10. Recommended Verification Checklist
 
 After making changes, verify at least:
 
@@ -296,7 +428,7 @@ After making changes, verify at least:
 6. Remote embedding mode can return a vector successfully
 7. If local embedding was touched, test first-run local model initialization separately
 
-## 10. Current Intent Of This Fork
+## 11. Current Intent Of This Fork
 
 This fork is optimized for:
 
