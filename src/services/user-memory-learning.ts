@@ -18,12 +18,18 @@ export async function performUserProfileLearning(
   try {
     const count = userPromptManager.countUnanalyzedForUserLearning();
     const threshold = CONFIG.userProfileAnalysisInterval;
+    log("UserProfile: learning check", { count, threshold });
 
     if (count < threshold) {
+      log("UserProfile: threshold not reached", { count, threshold });
       return;
     }
 
     const prompts = userPromptManager.getPromptsForUserLearning(threshold);
+    log("UserProfile: prompts selected", {
+      promptCount: prompts.length,
+      threshold,
+    });
 
     if (prompts.length === 0) {
       return;
@@ -39,6 +45,7 @@ export async function performUserProfileLearning(
     const updatedProfileData = await analyzeUserProfile(context, existingProfile);
 
     if (!updatedProfileData) {
+      log("UserProfile: analysis returned no update", { promptCount: prompts.length });
       userPromptManager.markMultipleAsUserLearningCaptured(prompts.map((p) => p.id));
       return;
     }
@@ -54,6 +61,11 @@ export async function performUserProfileLearning(
         prompts.length,
         changeSummary
       );
+      log("UserProfile: profile updated", {
+        userId,
+        promptCount: prompts.length,
+        changeSummary,
+      });
     } else {
       userProfileManager.createProfile(
         userId,
@@ -63,6 +75,10 @@ export async function performUserProfileLearning(
         updatedProfileData,
         prompts.length
       );
+      log("UserProfile: profile created", {
+        userId,
+        promptCount: prompts.length,
+      });
     }
 
     userPromptManager.markMultipleAsUserLearningCaptured(prompts.map((p) => p.id));
@@ -148,13 +164,13 @@ async function analyzeUserProfile(
   existingProfile: UserProfile | null
 ): Promise<UserProfileData | null> {
   if (CONFIG.opencodeProvider && CONFIG.opencodeModel) {
-    const { isProviderConnected, getStatePath, generateStructuredOutput } =
+    const { isProviderConnected, generateStructuredOutput } =
       await import("./ai/opencode-provider.js");
 
     if (!isProviderConnected(CONFIG.opencodeProvider)) {
-      throw new Error(
-        `opencode provider '${CONFIG.opencodeProvider}' is not connected. Check your opencode provider configuration.`
-      );
+      log("UserProfile: provider not reported as connected; trying direct config resolution", {
+        providerName: CONFIG.opencodeProvider,
+      });
     }
 
     const systemPrompt = `You are a user behavior analyst for a coding assistant.
@@ -192,7 +208,6 @@ Use the update_user_profile tool to save the ${existingProfile ? "updated" : "ne
     const result = await generateStructuredOutput({
       providerName: CONFIG.opencodeProvider,
       modelId: CONFIG.opencodeModel,
-      statePath: getStatePath(),
       systemPrompt,
       userPrompt: context,
       schema,

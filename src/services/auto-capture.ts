@@ -12,27 +12,39 @@ interface ToolCallInfo {
 
 const MAX_TOOL_INPUT_LENGTH = 100;
 
-let isCaptureRunning = false;
+const runningSessions = new Set<string>();
+
+export type AutoCaptureResult = "captured" | "skipped" | "retry" | "none" | "busy";
 
 export async function performAutoCapture(
   ctx: PluginInput,
   sessionID: string,
   directory: string
-): Promise<void> {
-  if (isCaptureRunning) return;
-  isCaptureRunning = true;
+): Promise<AutoCaptureResult> {
+  if (runningSessions.has(sessionID)) {
+    log("AutoCapture: session already running", { sessionID });
+    return "busy";
+  }
+
+  runningSessions.add(sessionID);
+  let claimedPromptId: string | null = null;
+  let claimedPromptHandled = false;
+  let result: AutoCaptureResult = "retry";
   try {
     log("AutoCapture: starting", { sessionID });
     const prompt = userPromptManager.getLastUncapturedPrompt(sessionID);
     if (!prompt) {
       log("AutoCapture: no uncaptured prompt found", { sessionID });
-      return;
+      result = "none";
+      return "none";
     }
 
     if (!userPromptManager.claimPrompt(prompt.id)) {
       log("AutoCapture: claim failed", { promptId: prompt.id });
-      return;
+      result = "retry";
+      return "retry";
     }
+    claimedPromptId = prompt.id;
     log("AutoCapture: prompt claimed", {
       promptId: prompt.id,
       content: prompt.content?.slice(0, 80),
@@ -50,7 +62,8 @@ export async function performAutoCapture(
 
     if (!response.data) {
       log("AutoCapture: no response data from messages API");
-      return;
+      result = "retry";
+      return "retry";
     }
 
     const messages = response.data;
@@ -62,14 +75,16 @@ export async function performAutoCapture(
         promptMessageId: prompt.messageId,
         messageIds: messages.map((m: any) => m.info?.id),
       });
-      return;
+      result = "retry";
+      return "retry";
     }
 
     const aiMessages = messages.slice(promptIndex + 1);
 
     if (aiMessages.length === 0) {
       log("AutoCapture: no AI messages after prompt");
-      return;
+      result = "retry";
+      return "retry";
     }
 
     const { textResponses, toolCalls } = extractAIContent(aiMessages);
@@ -80,7 +95,8 @@ export async function performAutoCapture(
 
     if (textResponses.length === 0 && toolCalls.length === 0) {
       log("AutoCapture: no usable content extracted");
-      return;
+      result = "retry";
+      return "retry";
     }
 
     const tags = getTags(directory);
@@ -94,11 +110,13 @@ export async function performAutoCapture(
     if (!summaryResult || summaryResult.type === "skip") {
       log("AutoCapture: summary skipped", { summaryResult });
       userPromptManager.deletePrompt(prompt.id);
-      return;
+      claimedPromptHandled = true;
+      result = "skipped";
+      return "skipped";
     }
     log("AutoCapture: summary generated", { type: summaryResult.type, tags: summaryResult.tags });
 
-    const result = await memoryClient.addMemory(summaryResult.summary, tags.project.tag, {
+    const memoryResult = await memoryClient.addMemory(summaryResult.summary, tags.project.tag, {
       source: "auto-capture" as any,
       type: summaryResult.type as any,
       tags: summaryResult.tags,
@@ -113,9 +131,16 @@ export async function performAutoCapture(
       gitRepoUrl: tags.project.gitRepoUrl,
     });
 
-    if (result.success) {
-      userPromptManager.linkMemoryToPrompt(prompt.id, result.id);
+    if (memoryResult.success) {
+      userPromptManager.linkMemoryToPrompt(prompt.id, memoryResult.id);
       userPromptManager.markAsCaptured(prompt.id);
+      claimedPromptHandled = true;
+      result = "captured";
+      log("AutoCapture: memory stored", {
+        promptId: prompt.id,
+        memoryId: memoryResult.id,
+        sessionID,
+      });
 
       if (CONFIG.showAutoCaptureToasts) {
         await ctx.client?.tui
@@ -129,12 +154,35 @@ export async function performAutoCapture(
           })
           .catch(() => {});
       }
+
+      return "captured";
     }
+
+    log("AutoCapture: memory store failed", {
+      promptId: prompt.id,
+      sessionID,
+      memoryResult,
+    });
+    result = "retry";
+    return "retry";
   } catch (error) {
     log("AutoCapture: ERROR", { error: String(error), stack: (error as any)?.stack });
+    result = "retry";
   } finally {
-    isCaptureRunning = false;
+    if (claimedPromptId && !claimedPromptHandled) {
+      userPromptManager.releasePrompt(claimedPromptId);
+      log("AutoCapture: prompt released for retry", { promptId: claimedPromptId });
+    }
+    log("AutoCapture: finished", {
+      sessionID,
+      result,
+      claimedPromptId,
+      claimedPromptHandled,
+    });
+    runningSessions.delete(sessionID);
   }
+
+  return result;
 }
 
 function extractAIContent(messages: any[]): {
@@ -253,6 +301,124 @@ function buildMarkdownContext(
   return sections.join("\n");
 }
 
+function tryParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractAutoCapturePayload(
+  value: unknown,
+  inherited: Record<string, unknown> = {}
+): Record<string, unknown> {
+  if (typeof value === "string") {
+    const parsed = tryParseJson(value);
+    if (parsed !== undefined) {
+      return extractAutoCapturePayload(parsed, inherited);
+    }
+    return inherited;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return inherited;
+  }
+
+  const record = value as Record<string, unknown>;
+  const merged: Record<string, unknown> = { ...inherited, ...record };
+
+  for (const key of ["answer", "result", "data", "response", "output", "payload"]) {
+    if (record[key] === undefined) continue;
+    return { ...merged, ...extractAutoCapturePayload(record[key], merged) };
+  }
+
+  return merged;
+}
+
+function buildSummaryFromSections(request: unknown, outcome: unknown): string {
+  const requestText = typeof request === "string" ? request.trim() : "";
+  const outcomeText = typeof outcome === "string" ? outcome.trim() : "";
+
+  const sections: string[] = [];
+  if (requestText) {
+    sections.push("## Request");
+    sections.push(requestText);
+  }
+  if (outcomeText) {
+    sections.push("## Outcome");
+    sections.push(outcomeText);
+  }
+
+  return sections.join("\n\n").trim();
+}
+
+function normalizeSummaryValue(value: unknown): string {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    const parsed = tryParseJson(trimmed);
+    if (parsed !== undefined && parsed !== value) {
+      const normalizedParsed = normalizeSummaryValue(parsed);
+      if (normalizedParsed) {
+        return normalizedParsed;
+      }
+    }
+    return trimmed;
+  }
+
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return "";
+  }
+
+  const record = value as Record<string, unknown>;
+  return buildSummaryFromSections(record.request, record.outcome);
+}
+
+function normalizeTagsValue(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.toLowerCase().trim())
+    .filter(Boolean);
+}
+
+function normalizeAutoCaptureResult(raw: unknown): {
+  summary: string;
+  type: string;
+  tags: string[];
+} {
+  const payload = extractAutoCapturePayload(raw);
+  const type = typeof payload.type === "string" ? payload.type.trim().toLowerCase() : "";
+  const summary =
+    normalizeSummaryValue(payload.summary) ||
+    buildSummaryFromSections(payload.request, payload.outcome) ||
+    (typeof payload.answer === "string" ? payload.answer.trim() : "");
+  const tags = normalizeTagsValue(payload.tags);
+
+  if (type === "skip") {
+    return {
+      summary,
+      type: "skip",
+      tags,
+    };
+  }
+
+  if (!summary) {
+    throw new Error(
+      `AutoCapture returned unsupported payload: ${JSON.stringify(raw).slice(0, 500)}`
+    );
+  }
+
+  return {
+    summary,
+    type: type || "other",
+    tags,
+  };
+}
+
 async function generateSummary(
   context: string,
   sessionID: string,
@@ -264,13 +430,13 @@ async function generateSummary(
       log("opencodeProvider takes precedence over memoryModel for auto-capture");
     }
 
-    const { isProviderConnected, getStatePath, generateStructuredOutput } =
+    const { isProviderConnected, generateStructuredOutput } =
       await import("./ai/opencode-provider.js");
 
     if (!isProviderConnected(CONFIG.opencodeProvider)) {
-      throw new Error(
-        `opencode provider '${CONFIG.opencodeProvider}' is not connected. Check your opencode provider configuration.`
-      );
+      log("AutoCapture: provider not reported as connected; trying direct config resolution", {
+        providerName: CONFIG.opencodeProvider,
+      });
     }
 
     const { detectLanguage, getLanguageName } = await import("./language-detector.js");
@@ -305,16 +471,11 @@ CAPTURE if: code changed, bug fixed, feature added, decision made`;
 Analyze this conversation. If it contains technical work (code, bugs, features, decisions), create a concise summary and relevant tags. If it's non-technical (greetings, casual chat, incomplete requests), return type="skip" with empty summary.`;
 
     const { z } = await import("zod");
-    const schema = z.object({
-      summary: z.string(),
-      type: z.string(),
-      tags: z.array(z.string()),
-    });
+    const schema = z.unknown();
 
     const result = await generateStructuredOutput({
       providerName: CONFIG.opencodeProvider,
       modelId: CONFIG.opencodeModel,
-      statePath: getStatePath(),
       systemPrompt,
       userPrompt: aiPrompt,
       schema,
@@ -322,11 +483,7 @@ Analyze this conversation. If it contains technical work (code, bugs, features, 
         CONFIG.memoryTemperature === false ? undefined : (CONFIG.memoryTemperature ?? 0.3),
     });
 
-    return {
-      summary: result.summary,
-      type: result.type,
-      tags: (result.tags || []).map((t: string) => t.toLowerCase().trim()),
-    };
+    return normalizeAutoCaptureResult(result);
   }
 
   // Existing manual config path
@@ -407,9 +564,5 @@ Analyze this conversation. If it contains technical work (code, bugs, features, 
     throw new Error(result.error || "Failed to generate summary");
   }
 
-  return {
-    summary: result.data.summary,
-    type: result.data.type,
-    tags: (result.data.tags || []).map((t: string) => t.toLowerCase().trim()),
-  };
+  return normalizeAutoCaptureResult(result.data);
 }

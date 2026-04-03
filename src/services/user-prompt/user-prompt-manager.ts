@@ -100,6 +100,13 @@ export class UserPromptManager {
     stmt.run(promptId);
   }
 
+  releasePrompt(promptId: string): void {
+    const stmt = this.db.prepare(
+      `UPDATE user_prompts SET captured = 0 WHERE id = ? AND captured = 2`
+    );
+    stmt.run(promptId);
+  }
+
   claimPrompt(promptId: string): boolean {
     const stmt = this.db.prepare(
       `UPDATE user_prompts SET captured = 2 WHERE id = ? AND captured = 0`

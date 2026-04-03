@@ -1,18 +1,23 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import type { ZodType } from "zod";
 import { stripJsoncComments } from "../jsonc.js";
 import { log } from "../logger.js";
 export {
+  getConfigPath,
   getStatePath,
   isProviderConnected,
   setConnectedProviders,
+  setConfigPath,
   setStatePath,
 } from "./opencode-state.js";
+import { getConfigPath } from "./opencode-state.js";
 
 interface OpencodeProviderConfig {
   npm?: string;
+  env?: string[];
   options?: {
     apiKey?: string;
     baseURL?: string;
@@ -27,18 +32,31 @@ interface OpencodeConfigFile {
   provider?: Record<string, OpencodeProviderConfig>;
 }
 
-function findOpencodeConfigPath(statePath: string): string | undefined {
+function configCandidates(basePath?: string | null): string[] {
+  if (!basePath) return [];
+  return [
+    basePath,
+    join(basePath, "config.json"),
+    join(basePath, "opencode.json"),
+    join(basePath, "opencode.jsonc"),
+  ];
+}
+
+function findOpencodeConfigPath(statePath?: string): string | undefined {
   const candidates = [
-    statePath,
-    join(statePath, "opencode.json"),
-    join(statePath, "opencode.jsonc"),
-    join(dirname(statePath), "opencode.json"),
-    join(dirname(statePath), "opencode.jsonc"),
-    join(homedir(), ".config", "opencode", "opencode.json"),
-    join(homedir(), ".config", "opencode", "opencode.jsonc"),
+    ...configCandidates(getConfigPath()),
+    ...configCandidates(statePath),
+    ...(statePath ? configCandidates(dirname(statePath)) : []),
+    ...configCandidates(join(homedir(), ".config", "opencode")),
   ];
 
+  const seen = new Set<string>();
+
   return candidates.find((candidate) => {
+    if (!candidate || seen.has(candidate)) {
+      return false;
+    }
+    seen.add(candidate);
     try {
       return existsSync(candidate) && statSync(candidate).isFile();
     } catch {
@@ -47,21 +65,94 @@ function findOpencodeConfigPath(statePath: string): string | undefined {
   });
 }
 
-function loadOpencodeConfig(statePath: string): OpencodeConfigFile {
+function resolveFileReference(filePath: string, baseDir: string): string {
+  const trimmed = filePath.trim();
+  if (!trimmed) {
+    throw new Error("File reference is empty");
+  }
+
+  if (trimmed.startsWith("~/")) {
+    return join(homedir(), trimmed.slice(2));
+  }
+
+  if (trimmed.startsWith("file://")) {
+    try {
+      return fileURLToPath(trimmed);
+    } catch {
+      return trimmed.slice("file://".length);
+    }
+  }
+
+  if (isAbsolute(trimmed)) {
+    return trimmed;
+  }
+
+  return resolve(baseDir, trimmed);
+}
+
+function resolveConfigString(value: string, baseDir: string): string {
+  let result = value.replace(/\{env:([^}]+)\}/g, (_match, envName) => {
+    return process.env[String(envName)] ?? "";
+  });
+
+  result = result.replace(/\{file:([^}]+)\}/g, (_match, filePath) => {
+    const resolvedPath = resolveFileReference(String(filePath), baseDir);
+    return readFileSync(resolvedPath, "utf-8").trim();
+  });
+
+  if (result.startsWith("env://")) {
+    return process.env[result.slice("env://".length)] ?? "";
+  }
+
+  if (result.startsWith("file://")) {
+    const resolvedPath = resolveFileReference(result, baseDir);
+    return readFileSync(resolvedPath, "utf-8").trim();
+  }
+
+  return result;
+}
+
+function resolveConfigValue(value: unknown, baseDir: string): unknown {
+  if (typeof value === "string") {
+    return resolveConfigString(value, baseDir);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveConfigValue(item, baseDir));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).map(([key, nested]) => [key, resolveConfigValue(nested, baseDir)])
+  );
+}
+
+function loadOpencodeConfig(statePath?: string): OpencodeConfigFile {
   const configPath = findOpencodeConfigPath(statePath);
   if (!configPath) {
-    throw new Error(`opencode config not found near ${statePath}`);
+    throw new Error(`opencode config not found near ${statePath ?? "default config directories"}`);
   }
 
   try {
+    log("OpencodeProvider: loading config", {
+      statePath: statePath ?? null,
+      configPath,
+    });
     const raw = readFileSync(configPath, "utf-8");
-    return JSON.parse(stripJsoncComments(raw)) as OpencodeConfigFile;
+    const parsed = JSON.parse(stripJsoncComments(raw)) as OpencodeConfigFile;
+    return resolveConfigValue(parsed, dirname(configPath)) as OpencodeConfigFile;
   } catch (error) {
     throw new Error(`Failed to read opencode config at ${configPath}: ${String(error)}`);
   }
 }
 
-function getProviderConfig(statePath: string, providerName: string): OpencodeProviderConfig {
+function getProviderConfig(
+  statePath: string | undefined,
+  providerName: string
+): OpencodeProviderConfig {
   const config = loadOpencodeConfig(statePath);
   const provider = config.provider?.[providerName];
 
@@ -85,7 +176,18 @@ function getBaseUrl(provider: OpencodeProviderConfig): string {
 
 function getApiKey(provider: OpencodeProviderConfig): string | undefined {
   const apiKey = provider.options?.apiKey;
-  return typeof apiKey === "string" && apiKey.trim() ? apiKey : undefined;
+  if (typeof apiKey === "string" && apiKey.trim()) {
+    return apiKey;
+  }
+
+  for (const envName of provider.env ?? []) {
+    const candidate = process.env[envName];
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+  }
+
+  return undefined;
 }
 
 function inferProviderKind(
@@ -131,6 +233,11 @@ async function callOpenAICompatible<T>(options: {
   temperature?: number;
 }): Promise<T> {
   const url = `${getBaseUrl(options.provider)}/chat/completions`;
+  log("OpencodeProvider: call openai-compatible", {
+    modelId: options.modelId,
+    url,
+    hasApiKey: !!getApiKey(options.provider),
+  });
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -210,6 +317,11 @@ async function callAnthropic<T>(options: {
   temperature?: number;
 }): Promise<T> {
   const url = `${getBaseUrl(options.provider)}/messages`;
+  log("OpencodeProvider: call anthropic-compatible", {
+    modelId: options.modelId,
+    url,
+    hasApiKey: !!getApiKey(options.provider),
+  });
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "anthropic-version": "2023-06-01",
@@ -261,7 +373,7 @@ async function callAnthropic<T>(options: {
 export async function generateStructuredOutput<T>(options: {
   providerName: string;
   modelId: string;
-  statePath: string;
+  statePath?: string;
   systemPrompt: string;
   userPrompt: string;
   schema: ZodType<T>;
@@ -269,6 +381,15 @@ export async function generateStructuredOutput<T>(options: {
 }): Promise<T> {
   const provider = getProviderConfig(options.statePath, options.providerName);
   const providerKind = inferProviderKind(options.providerName, provider);
+  log("OpencodeProvider: generate structured output", {
+    providerName: options.providerName,
+    modelId: options.modelId,
+    providerKind,
+    statePath: options.statePath ?? null,
+    configPath: getConfigPath(),
+    hasApiKey: !!getApiKey(provider),
+    hasBaseUrl: !!provider.options?.baseURL || !!provider.options?.baseUrl,
+  });
 
   try {
     if (providerKind === "anthropic") {

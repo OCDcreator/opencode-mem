@@ -15,14 +15,101 @@ import { isConfigured, CONFIG, initConfig } from "./config.js";
 import { log } from "./services/logger.js";
 import type { MemoryType } from "./types/index.js";
 import { getLanguageName } from "./services/language-detector.js";
-import { setStatePath, setConnectedProviders } from "./services/ai/opencode-state.js";
+import {
+  setConfigPath,
+  setStatePath,
+  setConnectedProviders,
+} from "./services/ai/opencode-state.js";
+
+const IDLE_CAPTURE_DELAY_MS = 10000;
+const MAX_IDLE_CAPTURE_PASSES = 10;
 
 export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
   initConfig(directory);
   const tags = getTags(directory);
   let webServer: WebServer | null = null;
-  let idleTimeout: Timer | null = null;
+  const idleTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  const sessionStatuses = new Map<string, "idle" | "busy" | "retry">();
+
+  const clearIdleTimer = (sessionID: string, reason: string) => {
+    const timer = idleTimeouts.get(sessionID);
+    if (!timer) return;
+    clearTimeout(timer);
+    idleTimeouts.delete(sessionID);
+    log("Idle timer cleared", { sessionID, reason });
+  };
+
+  const processIdleSession = async (sessionID: string, source: string) => {
+    log("Idle processing started", { sessionID, source });
+
+    try {
+      for (let pass = 1; pass <= MAX_IDLE_CAPTURE_PASSES; pass += 1) {
+        const captureResult = await performAutoCapture(ctx, sessionID, directory);
+        log("Idle auto-capture pass completed", {
+          sessionID,
+          source,
+          pass,
+          captureResult,
+        });
+
+        if (captureResult !== "captured" && captureResult !== "skipped") {
+          break;
+        }
+      }
+
+      if (webServer?.isServerOwner()) {
+        log("Idle processing: running owner-only maintenance", { sessionID });
+        await performUserProfileLearning(ctx, directory);
+        const { cleanupService } = await import("./services/cleanup-service.js");
+        if (await cleanupService.shouldRunCleanup()) {
+          log("Idle processing: cleanup scheduled", { sessionID });
+          await cleanupService.runCleanup();
+        }
+        const { connectionManager } = await import("./services/sqlite/connection-manager.js");
+        connectionManager.checkpointAll();
+      } else {
+        log("Idle processing: skipped owner-only maintenance", {
+          sessionID,
+          reason: "not_server_owner",
+        });
+      }
+    } catch (error) {
+      log("Idle processing error", { sessionID, source, error: String(error) });
+    } finally {
+      log("Idle processing finished", {
+        sessionID,
+        source,
+        finalStatus: sessionStatuses.get(sessionID) ?? "unknown",
+      });
+    }
+  };
+
+  const scheduleIdleProcessing = (sessionID: string, source: string) => {
+    clearIdleTimer(sessionID, `${source}:reschedule`);
+
+    const timer = setTimeout(() => {
+      idleTimeouts.delete(sessionID);
+      const status = sessionStatuses.get(sessionID) ?? "idle";
+      if (status !== "idle") {
+        log("Idle processing skipped because session resumed", {
+          sessionID,
+          source,
+          status,
+        });
+        return;
+      }
+
+      void processIdleSession(sessionID, source);
+    }, IDLE_CAPTURE_DELAY_MS);
+
+    idleTimeouts.set(sessionID, timer);
+    log("Idle timer scheduled", {
+      sessionID,
+      source,
+      delayMs: IDLE_CAPTURE_DELAY_MS,
+    });
+  };
 
   if (!isConfigured()) {
   }
@@ -48,10 +135,20 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
       if (pathResult.data?.state) {
         setStatePath(pathResult.data.state);
       }
+      if (pathResult.data?.config) {
+        setConfigPath(pathResult.data.config);
+      }
+      log("Initialized opencode paths", {
+        statePath: pathResult.data?.state,
+        configPath: pathResult.data?.config,
+      });
       const providerResult = await ctx.client.provider.list();
       if (providerResult.data?.connected) {
         setConnectedProviders(providerResult.data.connected);
       }
+      log("Initialized opencode provider state", {
+        connectedProviders: providerResult.data?.connected ?? [],
+      });
     } catch (error) {
       log("Failed to initialize opencode provider state", { error: String(error) });
     }
@@ -133,6 +230,11 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
       if (webServer) {
         await webServer.stop();
       }
+      for (const [sessionID, timer] of idleTimeouts.entries()) {
+        clearTimeout(timer);
+        log("Cleared idle timer during shutdown", { sessionID });
+      }
+      idleTimeouts.clear();
       memoryClient.close();
       process.exit(0);
     } catch (error) {
@@ -387,30 +489,31 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
     event: async (input: { event: { type: string; properties?: any } }) => {
       const event = input.event;
       log("Event received", { type: event.type, properties: event.properties });
+      if (event.type === "session.status") {
+        const sessionID = event.properties?.sessionID;
+        const statusType = event.properties?.status?.type;
+        if (
+          sessionID &&
+          (statusType === "idle" || statusType === "busy" || statusType === "retry")
+        ) {
+          sessionStatuses.set(sessionID, statusType);
+          log("Session status updated", { sessionID, statusType });
+
+          if (statusType === "idle") {
+            if (!isConfigured() || !CONFIG.autoCaptureEnabled) return;
+            scheduleIdleProcessing(sessionID, "session.status");
+          } else {
+            clearIdleTimer(sessionID, `session.status:${statusType}`);
+          }
+        }
+      }
+
       if (event.type === "session.idle") {
         if (!isConfigured() || !CONFIG.autoCaptureEnabled) return;
         const sessionID = event.properties?.sessionID;
         if (!sessionID) return;
-
-        if (idleTimeout) clearTimeout(idleTimeout);
-
-        idleTimeout = setTimeout(async () => {
-          try {
-            await performAutoCapture(ctx, sessionID, directory);
-
-            if (webServer?.isServerOwner()) {
-              await performUserProfileLearning(ctx, directory);
-              const { cleanupService } = await import("./services/cleanup-service.js");
-              if (await cleanupService.shouldRunCleanup()) await cleanupService.runCleanup();
-              const { connectionManager } = await import("./services/sqlite/connection-manager.js");
-              connectionManager.checkpointAll();
-            }
-          } catch (error) {
-            log("Idle processing error", { error: String(error) });
-          } finally {
-            idleTimeout = null;
-          }
-        }, 10000);
+        sessionStatuses.set(sessionID, "idle");
+        scheduleIdleProcessing(sessionID, "session.idle");
       }
 
       if (event.type === "session.compacted") {

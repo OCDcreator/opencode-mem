@@ -1,8 +1,13 @@
 let _statePath: string | null = null;
+let _configPath: string | null = null;
 let _connectedProviders: string[] = [];
 
 export function setStatePath(path: string): void {
   _statePath = path;
+}
+
+export function setConfigPath(path: string): void {
+  _configPath = path;
 }
 
 export function getStatePath(): string {
@@ -10,6 +15,10 @@ export function getStatePath(): string {
     throw new Error("opencode state path not initialized. Plugin may not be fully started.");
   }
   return _statePath;
+}
+
+export function getConfigPath(): string | null {
+  return _configPath;
 }
 
 export function setConnectedProviders(providers: unknown[]): void {
