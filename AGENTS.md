@@ -3,7 +3,7 @@
 This document is the current maintenance guide for the `OCDcreator/opencode-mem` fork.
 It is intended for future coding agents and maintainers working on this repository.
 
-Last updated: 2026-04-02
+Last updated: 2026-04-03
 
 ## 1. Fork Identity
 
@@ -195,17 +195,46 @@ Current active setup:
 
 ## 6. OpenCode Installation Notes
 
+### 6.1 Current preferred setup: local plugin mode
+
+This fork is now intended to be loaded as a **local plugin**, not as an npm plugin.
+
+Current preferred local setup:
+
+- OpenCode config file: `~/.config/opencode/opencode.json`
+- Local plugin wrapper: `~/.config/opencode/plugins/opencode-mem.js`
+- Wrapper target: this working copy's built file, typically
+  `C:/Users/lt/Desktop/Write/custom-project/opencode-mem/dist/index.js`
+
+Important rule:
+
+- Keep `opencode-mem` **out of** the `"plugin"` array in `~/.config/opencode/opencode.json`.
+- On this machine, the local wrapper should be the source of truth.
+
+Why this matters:
+
+- npm plugin mode can cause OpenCode Desktop to reinstall or refresh a separate copy under cache.
+- local plugin mode avoids that extra copy and keeps development pointed at this working tree.
+
+### 6.2 Legacy npm/cache plugin behavior
+
 Important local behavior discovered during debugging:
 
-- OpenCode loads npm plugins from `~/.cache/opencode/node_modules/`
-- A symlink under `~/.config/opencode/node_modules/` was not used by this environment
+- When `opencode-mem` is configured via the `"plugin"` array, OpenCode Desktop may load it from `~/.cache/opencode/node_modules/opencode-mem/`
+- A symlink under `~/.config/opencode/node_modules/` was not the active path in this environment
+- If Desktop falls back to the cached npm copy, it may load an outdated upstream build instead of this fork
 
-For local development, the active plugin path may be replaced with a Junction or symlink pointing to this working copy.
+Why this is dangerous on this machine:
+
+- The cached upstream build reintroduced Windows startup failure involving `@xenova/transformers` / `sharp`
+- When that happens, the plugin fails to load and the Web UI on `127.0.0.1:4747` disappears
 
 Practical rule:
 
-- If OpenCode appears to ignore local code changes, verify which `opencode-mem` directory it is actually loading.
-- Check the desktop logs for the exact `dist/plugin.js` path being loaded.
+- Prefer local plugin mode over npm plugin mode on this machine
+- If OpenCode appears to ignore local code changes, verify which `opencode-mem` path it is actually loading
+- Check the desktop logs for the exact plugin target path being loaded
+- If logs mention `~/.cache/opencode/node_modules/opencode-mem/dist/plugin.js`, Desktop is probably using the wrong copy again
 
 ## 7. Operational Caveats
 
@@ -250,6 +279,8 @@ When working on this fork, start with:
 - `src/config.ts`
 - `src/web/index.html`
 - `src/web/styles.css`
+- `~/.config/opencode/opencode.json`
+- `~/.config/opencode/plugins/opencode-mem.js`
 
 These files contain most of the fork-specific behavior changes.
 
@@ -258,10 +289,12 @@ These files contain most of the fork-specific behavior changes.
 After making changes, verify at least:
 
 1. `bun run build`
-2. Plugin module can be imported from `dist/plugin.js`
-3. Web UI can respond on `http://127.0.0.1:4747/api/stats`
-4. Remote embedding mode can return a vector successfully
-5. If local embedding was touched, test first-run local model initialization separately
+2. Local plugin wrapper still points at this working copy's `dist/index.js`
+3. `~/.config/opencode/opencode.json` does not list `opencode-mem` in the `"plugin"` array
+4. Plugin module can be imported from `dist/plugin.js`
+5. Web UI can respond on `http://127.0.0.1:4747/api/stats`
+6. Remote embedding mode can return a vector successfully
+7. If local embedding was touched, test first-run local model initialization separately
 
 ## 10. Current Intent Of This Fork
 

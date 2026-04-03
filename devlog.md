@@ -1,5 +1,46 @@
 # Development Log
 
+## 2026-04-03 — Switch OpenCode Desktop To Local Plugin Mode
+
+### Changed files
+
+| File        | Change                                                       |
+| ----------- | ------------------------------------------------------------ |
+| `AGENTS.md` | Document local plugin mode as the preferred setup on Windows |
+| `devlog.md` | Record why npm/cache plugin loading was replaced             |
+
+### 1. Root cause of the recurring Web UI failure
+
+OpenCode Desktop was not consistently loading this working copy.
+
+When `opencode-mem` was configured through the `"plugin"` array in
+`~/.config/opencode/opencode.json`, Desktop could reinstall or refresh an npm
+copy under `~/.cache/opencode/node_modules/opencode-mem/` and load that copy
+instead of this fork.
+
+That cached copy could be an older upstream build which still triggered the
+Windows startup failure involving `@xenova/transformers` / `sharp`. When the
+plugin failed to load, the Web UI on `http://127.0.0.1:4747` disappeared.
+
+### 2. Operational fix
+
+The preferred setup on this machine is now **local plugin mode**:
+
+- keep `opencode-mem` out of the `"plugin"` array
+- load the plugin through `~/.config/opencode/plugins/opencode-mem.js`
+- have that local wrapper import this working tree's built output
+
+This avoids relying on the cache-managed npm copy and keeps OpenCode Desktop
+pointed at the fork being developed locally.
+
+### 3. Maintenance rule for future debugging
+
+If Web UI disappears again, inspect the Desktop logs first and verify the exact
+plugin target path being loaded.
+
+If logs point at `~/.cache/opencode/node_modules/opencode-mem/dist/plugin.js`,
+Desktop has probably fallen back to the wrong npm/cache copy again.
+
 ## 2026-04-02 — Windows Compatibility & Provider Rewrite
 
 ### Changed files
