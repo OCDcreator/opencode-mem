@@ -3,6 +3,77 @@
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
 > 当前最新更新：2026-04-03
 
+## 2026-04-03 — Merge OpenCode 1.3 Loader Compatibility Into The Custom Fork
+
+### Changed files
+
+| File                                   | Change                                                                  |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| `package.json`                         | Add package exports map and bump plugin/sdk dependencies to 1.3 line    |
+| `src/plugin.ts`                        | Export `PluginModule` with `server` entrypoint instead of bare function |
+| `tests/plugin-loader-contract.test.ts` | Add regression test for OpenCode 1.3 plugin loader contract             |
+| `AGENTS.md`                            | Update fork version and document cross-platform loader compatibility    |
+| `devlog.md`                            | Record the upstream compatibility merge                                 |
+
+### 1. Upstream change worth merging
+
+Upstream `v2.13.0` primarily introduced one high-value fix:
+
+- restore compatibility with the OpenCode 1.3 plugin loader contract
+
+This was a real integration fix, not just a cosmetic version bump, and it
+matters for both Windows and macOS.
+
+### 2. Why this fork did not take a blind merge
+
+This fork already contains local changes that must be preserved:
+
+- Windows-safe build script
+- OpenCode provider rewrite
+- startup tolerance changes
+- local debugging and historical backfill tooling
+
+So instead of replacing the fork with upstream wholesale, the required loader
+contract pieces were merged into the custom fork selectively.
+
+### 3. What changed
+
+`package.json` now:
+
+- exposes both `"."` and `"./server"` from `dist/plugin.js`
+- uses the OpenCode 1.3-compatible `@opencode-ai/plugin` and `@opencode-ai/sdk` line
+- keeps the custom Node-based build script so builds still work on Windows and macOS
+
+`src/plugin.ts` now exports:
+
+- `default { server: OpenCodeMemPlugin }`
+
+instead of:
+
+- a bare default plugin function
+
+This matches the modern loader expectation used by newer OpenCode versions.
+
+### 4. Cross-platform note
+
+This compatibility merge was done with dual-device usage in mind:
+
+- Windows still keeps the custom build/runtime fixes
+- macOS now benefits from the same modern loader contract instead of depending on legacy export behavior
+
+The goal is one fork that works across both machines, not separate Windows-only
+and macOS-only plugin behavior.
+
+### 5. Verification
+
+Local verification after the merge:
+
+- `bun install`
+- `bun run build`
+- `bun test tests/plugin-loader-contract.test.ts`
+
+All passed after rebuilding `dist/plugin.js`.
+
 ## 2026-04-03 — Stabilize Idle Scheduling And Add Detailed Auto-Capture Diagnostics
 
 ### Changed files

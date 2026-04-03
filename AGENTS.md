@@ -9,9 +9,9 @@ Last updated: 2026-04-03
 
 - Upstream repository: `https://github.com/tickernelz/opencode-mem`
 - Fork repository: `https://github.com/OCDcreator/opencode-mem`
-- Local package version in this fork: `2.12.1-custom`
+- Local package version in this fork: `2.13.0-custom`
 
-This fork is not a pure mirror. It contains behavior and compatibility fixes that are important for local OpenCode usage on Windows.
+This fork is not a pure mirror. It contains behavior and compatibility fixes that are important for local OpenCode usage across Windows and macOS, with several fixes originally added because Windows was failing first.
 
 ## 2. What Changed In This Fork
 
@@ -49,6 +49,7 @@ Practical rule:
 
 - Use `bun run build`.
 - Do not reintroduce shell-only copy commands unless they are Windows-safe.
+- Prefer platform-neutral Node/Bun filesystem logic so the same build keeps working on macOS too.
 
 ### 2.3 Plugin startup is less fragile
 
@@ -153,6 +154,30 @@ Practical rule:
 
 - Keep provider output schemas rooted at a JSON object.
 - If parsing fails, inspect the logged raw content before changing prompt/schema code.
+
+### 2.8 OpenCode 1.3 plugin loader compatibility was restored
+
+Files:
+
+- `package.json`
+- `src/plugin.ts`
+- `tests/plugin-loader-contract.test.ts`
+
+Important change:
+
+- The package now exports both `"."` and `"./server"` through `dist/plugin.js`.
+- `src/plugin.ts` now exports a `PluginModule` object with a `server` entrypoint instead of a bare default function.
+- Plugin/runtime dependencies were moved to the OpenCode 1.3-compatible line.
+
+Why this matters:
+
+- Newer OpenCode builds can skip plugins that only export a bare default function.
+- This compatibility fix matters on both Windows and macOS because it is a loader contract issue, not a platform-specific runtime bug.
+
+Practical rule:
+
+- Preserve the `PluginModule` export shape unless you intentionally rework plugin loading against a newer official contract.
+- If plugin loading silently breaks after an OpenCode upgrade, re-run the loader contract test first.
 
 ## 3. Current Known-Good Runtime Configuration
 
@@ -321,8 +346,9 @@ Current preferred local setup:
 
 - OpenCode config file: `~/.config/opencode/opencode.json`
 - Local plugin wrapper: `~/.config/opencode/plugins/opencode-mem.js`
-- Wrapper target: this working copy's built file, typically
-  `C:/Users/lt/Desktop/Write/custom-project/opencode-mem/dist/index.js`
+- Wrapper target: this working copy's built file, typically:
+  - Windows example: `C:/Users/lt/Desktop/Write/custom-project/opencode-mem/dist/index.js`
+  - macOS example: `/Users/<you>/Desktop/Write/custom-project/opencode-mem/dist/index.js`
 
 Important rule:
 
@@ -353,6 +379,7 @@ Practical rule:
 - If OpenCode appears to ignore local code changes, verify which `opencode-mem` path it is actually loading
 - Check the desktop logs for the exact plugin target path being loaded
 - If logs mention `~/.cache/opencode/node_modules/opencode-mem/dist/plugin.js`, Desktop is probably using the wrong copy again
+- Apply the same check on macOS too; the exact cache root can differ, but the failure mode is the same: OpenCode can load a cached npm copy instead of your working tree.
 
 ## 8. Operational Caveats
 
@@ -432,7 +459,9 @@ After making changes, verify at least:
 
 This fork is optimized for:
 
-- Windows-friendly development
+- cross-platform local development
+- Windows-friendly development where upstream behavior was fragile
+- macOS local plugin usage with the same repository and loader contract
 - OpenCode local plugin iteration
 - stable startup behavior
 - support for both local embedding and remote embedding
