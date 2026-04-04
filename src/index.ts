@@ -9,6 +9,7 @@ import { stripPrivateContent, isFullyPrivate } from "./services/privacy.js";
 import { performAutoCapture } from "./services/auto-capture.js";
 import { performUserProfileLearning } from "./services/user-memory-learning.js";
 import { userPromptManager } from "./services/user-prompt/user-prompt-manager.js";
+import { extractNonSyntheticUserMessage } from "./services/user-message.js";
 import { startWebServer, WebServer } from "./services/web-server.js";
 
 import { isConfigured, CONFIG, initConfig } from "./config.js";
@@ -251,12 +252,7 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
       if (!isConfigured() || !CONFIG.chatMessage.enabled) return;
 
       try {
-        const textParts = output.parts.filter(
-          (p): p is Part & { type: "text"; text: string } => p.type === "text"
-        );
-
-        if (textParts.length === 0) return;
-        const userMessage = textParts.map((p) => p.text).join("\n");
+        const userMessage = extractNonSyntheticUserMessage(output.parts);
         if (!userMessage.trim()) return;
 
         userPromptManager.savePrompt(input.sessionID, output.message.id, directory, userMessage);
