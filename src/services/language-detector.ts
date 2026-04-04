@@ -55,7 +55,6 @@ function detectByScript(text: string): string | null {
 
   return null;
 }
-
 export function detectLanguage(text: string): string {
   if (!text || text.trim().length === 0) {
     return "en";
@@ -68,7 +67,7 @@ export function detectLanguage(text: string): string {
     return scriptGuess;
   }
 
-  const detected = franc(candidate, { minLength: 10 });
+  const detected = franc(candidate, { minLength: 5 });
 
   if (detected === "und") {
     return "en";
