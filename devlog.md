@@ -1,7 +1,68 @@
 # Development Log
 
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
-> 当前最新更新：2026-04-03
+> 当前最新更新：2026-04-04
+
+## 2026-04-04 — Fix Auto-Capture Language Drift Caused By Paths And `franc` Aliases
+
+### Changed files
+
+| File                                | Change                                                                |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| `src/services/language-detector.ts` | Strip path/URL noise before detection and add script/ISO alias guards |
+| `tests/language-detector.test.ts`   | Add regression tests for Chinese-with-path and Cyrillic prompts       |
+| `devlog.md`                         | Record the root cause and verification                                |
+
+### 1. Runtime symptom
+
+The newest auto-captured memory could sometimes appear in the wrong language
+even when the user never spoke that language.
+
+Observed local failure pattern:
+
+- a Chinese prompt that started with a Windows path produced a foreign-language memory
+- the saved memory language did not match either the current Web UI language or the visible user prompt
+- the issue reproduced specifically in auto-capture, not manual memory editing
+
+### 2. Root cause
+
+`autoCaptureLanguage` is currently left in `auto` mode, so auto-capture first
+detects the prompt language and then instructs the summarizer to write in that
+language.
+
+The old detector was too naive for real coding prompts:
+
+- it passed raw prompt text directly to `franc`
+- raw prompts often include Windows paths, repo names, URLs, code fences, and mixed-language tokens
+- `franc` can misclassify that noisy text, especially when the prompt begins with `C:\...`
+- the detector also did not normalize some common ISO-639-3 results such as `cmn` to `zh`
+
+That meant a Chinese prompt could be misdetected as another language before the
+summary request was even sent to the model.
+
+### 3. Fix
+
+`src/services/language-detector.ts` now:
+
+- removes code fences, inline code, URLs, Windows paths, Unix-like paths, and path-like token chains before detection
+- uses a lightweight script-based guard for Han, Hiragana/Katakana, Hangul, Cyrillic, and Arabic text before falling back to `franc`
+- maps common ISO-639-3 detection results such as `cmn`, `zho`, `yue`, `jpn`, `kor`, and `rus` to the expected plugin language codes
+
+This keeps technical prompt noise from dominating language detection while still
+preserving the existing `auto` workflow.
+
+### 4. Verification
+
+Local verification after the fix:
+
+- `bun test tests/language-detector.test.ts`
+- `bun run build`
+
+Regression tests now cover:
+
+- plain Chinese prompt detection
+- Chinese prompt preceded by a Windows path
+- Cyrillic prompt detection for Russian text
 
 ## 2026-04-03 — Merge OpenCode 1.3 Loader Compatibility Into The Custom Fork
 
