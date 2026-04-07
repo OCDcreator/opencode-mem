@@ -1,7 +1,98 @@
 # Development Log
 
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
-> 当前最新更新：2026-04-04
+> 当前最新更新：2026-04-08
+
+## 2026-04-08 — Verify Local Plugin Loading Against OpenCode Source And Document The Correct Path
+
+### Changed files
+
+| File                              | Change                                                               |
+| --------------------------------- | -------------------------------------------------------------------- |
+| `tsconfig.json`                   | Add Bun type declarations so `bun run build` succeeds again          |
+| `AGENTS.md`                       | Record source-verified local plugin loading rules and wrapper shape  |
+| `devlog.md`                       | Record the verified loader diagnosis and minimal fix                 |
+| `opencode-local-plugin-loading.md`| Add a future-maintainer playbook for loading this plugin correctly   |
+
+### 1. User-visible symptom
+
+The user only wanted one thing: make the plugin load normally again inside
+OpenCode on macOS without breaking the Windows-friendly fork behavior.
+
+The misleading part was that the plugin already worked on Windows, so changing
+random runtime logic first would have been the wrong move.
+
+### 2. What was actually wrong
+
+The local loading problem was verified against the real OpenCode source tree,
+not inferred from memory.
+
+Source-verified behavior:
+
+- local plugins in `~/.config/opencode/plugins/` are auto-loaded
+- path plugins must export `id`
+- server plugins must default export an object with `server()`
+- a local plugin and an npm plugin can both load, so keeping `opencode-mem` in
+  the `"plugin"` array can make OpenCode use a cached npm copy instead of this
+  working tree
+
+The real local failure mode was the wrapper/export contract, not plugin
+discovery itself.
+
+### 3. Minimal fix kept
+
+Only the minimal repo-level fix was kept:
+
+- `tsconfig.json` now includes `"types": ["bun"]`
+
+Why this was necessary:
+
+- this fork already uses `bun run build`
+- `@types/bun` was already installed
+- without the Bun types, `bunx tsc` failed on Bun/Node runtime globals even
+  though the runtime code itself was still valid
+
+The actual local loader fix lives outside the repo in the user's local plugin
+wrapper:
+
+- `~/.config/opencode/plugins/opencode-mem.js`
+
+That wrapper must export both:
+
+- `export const id = "opencode-mem"`
+- `export default { id, server: OpenCodeMemPlugin }`
+
+### 4. Verification
+
+Fast loader verification:
+
+- `~/.opencode/bin/opencode --print-logs --log-level INFO stats`
+
+Persistent Web UI verification:
+
+- `~/.opencode/bin/opencode . --print-logs --log-level INFO`
+- `curl http://127.0.0.1:4747/api/stats`
+- `curl http://127.0.0.1:4747/`
+
+Observed local result:
+
+- the plugin loaded from the local wrapper path
+- `http://127.0.0.1:4747/api/stats` returned `200`
+- `http://127.0.0.1:4747/` returned `200`
+- after stopping the OpenCode instance, port `4747` disappeared immediately
+
+### 5. Important lesson for future debugging
+
+If Windows already works, do not start by rewriting business logic.
+
+Check these first:
+
+1. which plugin path OpenCode is actually loading
+2. whether the local wrapper matches the current loader contract
+3. whether the plugin is accidentally also configured via the npm `"plugin"` array
+4. whether the verification command is long-lived enough to keep the Web UI alive
+
+That order avoids unnecessary source churn and preserves cross-platform behavior.
 
 ## 2026-04-04 — Fix Auto-Capture Language Drift Caused By Paths And `franc` Aliases
 

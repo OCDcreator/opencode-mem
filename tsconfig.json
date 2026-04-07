@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "lib": ["ESNext"],
+    "types": ["bun"],
     "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",
@@ -30,4 +31,3 @@
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 }
-

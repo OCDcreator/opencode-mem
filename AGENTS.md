@@ -3,7 +3,7 @@
 This document is the current maintenance guide for the `OCDcreator/opencode-mem` fork.
 It is intended for future coding agents and maintainers working on this repository.
 
-Last updated: 2026-04-03
+Last updated: 2026-04-08
 
 ## 1. Fork Identity
 
@@ -39,17 +39,20 @@ Files:
 
 - `package.json`
 - `scripts/build.mjs`
+- `tsconfig.json`
 
 Important change:
 
 - The old build script used Unix shell commands like `mkdir -p` and `cp -r`.
 - This fork replaced that with a Node-based copy step so `bun run build` works on Windows.
+- `tsconfig.json` now explicitly includes `"types": ["bun"]` so the TypeScript build sees Bun/Node runtime globals during `bun run build`.
 
 Practical rule:
 
 - Use `bun run build`.
 - Do not reintroduce shell-only copy commands unless they are Windows-safe.
 - Prefer platform-neutral Node/Bun filesystem logic so the same build keeps working on macOS too.
+- If the build suddenly loses `Bun`, `process`, `fetch`, or Node builtin module types, fix the compiler type setup first instead of patching runtime code.
 
 ### 2.3 Plugin startup is less fragile
 
@@ -178,6 +181,31 @@ Practical rule:
 
 - Preserve the `PluginModule` export shape unless you intentionally rework plugin loading against a newer official contract.
 - If plugin loading silently breaks after an OpenCode upgrade, re-run the loader contract test first.
+
+### 2.9 Local plugin loading was verified against OpenCode source
+
+Source-of-truth repo on this machine:
+
+- `/Volumes/SDD2T/obsidian-vault-write/open-source-project/opencode`
+
+Important confirmed behavior:
+
+- Local plugins in `~/.config/opencode/plugins/` are auto-loaded.
+- OpenCode scans `{plugin,plugins}/*.{ts,js}` under config/project directories.
+- Path plugins must export `id`.
+- Server plugins must default export an object with `server()`.
+- A local plugin and an npm plugin can both load, so duplicate configuration is dangerous.
+
+Why this matters:
+
+- Earlier debugging can easily go wrong if an agent assumes the `"plugin"` array is required for local wrapper loading.
+- On this machine that assumption was false; local plugin discovery already worked.
+- The real failure mode was the wrapper/export contract and, separately, cached npm plugin copies.
+
+Practical rule:
+
+- When debugging loading, inspect the OpenCode source or logs before changing plugin runtime logic.
+- Treat the local wrapper contract as part of the deployed system, even though it lives outside this repo.
 
 ## 3. Current Known-Good Runtime Configuration
 
@@ -355,6 +383,28 @@ Important rule:
 - Keep `opencode-mem` **out of** the `"plugin"` array in `~/.config/opencode/opencode.json`.
 - On this machine, the local wrapper should be the source of truth.
 
+Required wrapper shape:
+
+```js
+import { pathToFileURL } from "node:url";
+
+const entryUrl = pathToFileURL("/absolute/path/to/opencode-mem/dist/index.js").href;
+const { OpenCodeMemPlugin } = await import(entryUrl);
+
+export const id = "opencode-mem";
+
+export default {
+  id,
+  server: OpenCodeMemPlugin,
+};
+```
+
+Notes:
+
+- For Windows, prefer forward slashes inside the absolute path string, for example `C:/Users/.../dist/index.js`.
+- Do not default export a bare function from the wrapper.
+- Do not omit `id`, or OpenCode 1.3 path-plugin loading will fail.
+
 Why this matters:
 
 - npm plugin mode can cause OpenCode Desktop to reinstall or refresh a separate copy under cache.
@@ -380,6 +430,23 @@ Practical rule:
 - Check the desktop logs for the exact plugin target path being loaded
 - If logs mention `~/.cache/opencode/node_modules/opencode-mem/dist/plugin.js`, Desktop is probably using the wrong copy again
 - Apply the same check on macOS too; the exact cache root can differ, but the failure mode is the same: OpenCode can load a cached npm copy instead of your working tree.
+
+### 7.3 Web UI lifecycle during verification
+
+Important local behavior:
+
+- The plugin Web UI on `127.0.0.1:4747` only stays up while a live OpenCode project instance is still running.
+- Short-lived commands such as `opencode stats` are useful for loader verification, but they dispose the instance immediately after the command finishes.
+
+Why this matters:
+
+- Seeing `4747` disappear after a short-lived command does not mean the plugin failed to load.
+- A persistent verification should use a long-lived project instance.
+
+Practical rule:
+
+- Use `~/.opencode/bin/opencode --print-logs --log-level INFO stats` for a quick loader check.
+- Use `~/.opencode/bin/opencode . --print-logs --log-level INFO` when you need the Web UI to remain reachable while testing.
 
 ## 8. Operational Caveats
 
@@ -438,6 +505,7 @@ When working on this fork, start with:
 - `src/config.ts`
 - `src/web/index.html`
 - `src/web/styles.css`
+- `opencode-local-plugin-loading.md`
 - `~/.config/opencode/opencode.json`
 - `~/.config/opencode/plugins/opencode-mem.js`
 
@@ -451,9 +519,10 @@ After making changes, verify at least:
 2. Local plugin wrapper still points at this working copy's `dist/index.js`
 3. `~/.config/opencode/opencode.json` does not list `opencode-mem` in the `"plugin"` array
 4. Plugin module can be imported from `dist/plugin.js`
-5. Web UI can respond on `http://127.0.0.1:4747/api/stats`
-6. Remote embedding mode can return a vector successfully
-7. If local embedding was touched, test first-run local model initialization separately
+5. `~/.opencode/bin/opencode --print-logs --log-level INFO stats` shows the local wrapper path loading without a plugin export error
+6. A live `opencode .` instance can serve `http://127.0.0.1:4747/api/stats`
+7. Remote embedding mode can return a vector successfully
+8. If local embedding was touched, test first-run local model initialization separately
 
 ## 11. Current Intent Of This Fork
 
