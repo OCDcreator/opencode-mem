@@ -154,8 +154,8 @@ function renderCombinedCard(pair) {
       : "";
 
   const pinButton = isPinned
-    ? `<button class="btn-pin pinned" onclick="unpinMemory('${memory.id}')" title="Unpin"><i data-lucide="pin" class="icon icon-filled"></i></button>`
-    : `<button class="btn-pin" onclick="pinMemory('${memory.id}')" title="Pin"><i data-lucide="pin" class="icon"></i></button>`;
+    ? `<button class="btn-pin pinned" onclick="unpinMemory('${memory.id}')" title="${t("title-unpin")}"><i data-lucide="pin" class="icon icon-filled"></i></button>`
+    : `<button class="btn-pin" onclick="pinMemory('${memory.id}')" title="${t("title-pin")}"><i data-lucide="pin" class="icon"></i></button>`;
 
   const createdDate = formatDate(memory.createdAt);
   const updatedDate =
@@ -200,7 +200,7 @@ function renderCombinedCard(pair) {
         <div class="memory-content markdown-content">${renderMarkdown(memory.content)}</div>
         <div class="memory-footer">
           ${dateInfo}
-          <span>ID: ${memory.id}</span>
+          <span>${t("label-memory-id")} ${memory.id}</span>
         </div>
       </div>
     </div>
@@ -261,8 +261,8 @@ function renderMemoryCard(memory) {
   }
 
   const pinButton = isPinned
-    ? `<button class="btn-pin pinned" onclick="unpinMemory('${memory.id}')" title="Unpin"><i data-lucide="pin" class="icon icon-filled"></i></button>`
-    : `<button class="btn-pin" onclick="pinMemory('${memory.id}')" title="Pin"><i data-lucide="pin" class="icon"></i></button>`;
+    ? `<button class="btn-pin pinned" onclick="unpinMemory('${memory.id}')" title="${t("title-unpin")}"><i data-lucide="pin" class="icon icon-filled"></i></button>`
+    : `<button class="btn-pin" onclick="pinMemory('${memory.id}')" title="${t("title-pin")}"><i data-lucide="pin" class="icon"></i></button>`;
 
   const createdDate = formatDate(memory.createdAt);
   const updatedDate =
@@ -302,7 +302,7 @@ function renderMemoryCard(memory) {
       ${isLinked ? `<div class="link-indicator"><i data-lucide="arrow-up" class="icon-sm"></i> ${t("text-from-below")} <i data-lucide="arrow-down" class="icon-sm"></i></div>` : ""}
       <div class="memory-footer">
         ${dateInfo}
-        <span>ID: ${memory.id}</span>
+        <span>${t("label-memory-id")} ${memory.id}</span>
       </div>
     </div>
   `;
@@ -359,7 +359,7 @@ function updatePagination() {
 
 function updateSectionTitle() {
   const title = state.isSearching
-    ? `└─ SEARCH RESULTS (${state.totalItems}) ──`
+    ? t("section-search", { count: state.totalItems })
     : t("section-project", { count: state.totalItems });
   document.getElementById("section-title").textContent = title;
 }
@@ -829,14 +829,10 @@ async function runMigration(strategy) {
     return;
   }
 
-  const strategyName =
-    strategy === "fresh-start" ? "Fresh Start (Delete All)" : "Re-embed (Preserve Data)";
+  const confirmMessage =
+    strategy === "fresh-start" ? t("migration-confirm-fresh") : t("migration-confirm-reembed");
 
-  if (
-    !confirm(
-      `Run ${strategyName} migration?\n\nThis operation is IRREVERSIBLE and will:\n${strategy === "fresh-start" ? "- DELETE all existing memories\n- Remove all shards" : "- Re-embed all memories with new model\n- This may take several minutes"}\n\nContinue?`
-    )
-  ) {
+  if (!confirm(confirmMessage)) {
     return;
   }
 
@@ -848,15 +844,6 @@ async function runMigration(strategy) {
   });
 
   if (result.success) {
-    const data = result.data;
-    let message = `Migration complete! `;
-
-    if (strategy === "fresh-start") {
-      message += `Deleted ${data.deletedShards} shard(s). Duration: ${(data.duration / 1000).toFixed(2)}s`;
-    } else {
-      message += `Re-embedded ${data.reEmbeddedMemories} memories. Duration: ${(data.duration / 1000).toFixed(2)}s`;
-    }
-
     showToast(t("toast-migration-success"), "success");
     document.getElementById("migration-section").classList.add("hidden");
     document.getElementById("migration-confirm-checkbox").checked = false;
@@ -886,7 +873,7 @@ function renderUserProfile() {
     container.innerHTML = `
       <div class="empty-state">
         <i data-lucide="user-x" class="icon-large"></i>
-        <p>${profile.message}</p>
+        <p>${t("empty-profile")}</p>
       </div>
     `;
     lucide.createIcons();
@@ -948,7 +935,7 @@ function renderUserProfile() {
         </div>
       </div>
       <button id="view-changelog-btn" class="btn-secondary compact">
-        <i data-lucide="history" class="icon"></i> History
+        <i data-lucide="history" class="icon"></i> ${t("btn-history")}
       </button>
     </div>
 
@@ -966,7 +953,7 @@ function renderUserProfile() {
                 (p) => `
               <div class="compact-card preference-card">
                 <div class="card-top">
-                  <span class="category-tag">${escapeHtml(p.category || "General")}</span>
+                  <span class="category-tag">${escapeHtml(p.category || t("text-default-category"))}</span>
                   <div class="confidence-ring" style="--p:${Math.round((p.confidence || 0) * 100)}">
                     <span>${Math.round((p.confidence || 0) * 100)}%</span>
                   </div>
@@ -979,7 +966,7 @@ function renderUserProfile() {
                     ? `
                 <div class="card-footer">
                   <span class="evidence-toggle" title="${escapeHtml(Array.isArray(p.evidence) ? p.evidence.join("\n") : p.evidence)}">
-                    <i data-lucide="info" class="icon-xs"></i> ${Array.isArray(p.evidence) ? p.evidence.length : 1} evidence
+                    <i data-lucide="info" class="icon-xs"></i> ${t("text-evidence-count", { count: Array.isArray(p.evidence) ? p.evidence.length : 1 })}
                   </span>
                 </div>`
                     : ""
@@ -1005,7 +992,7 @@ function renderUserProfile() {
                 (p) => `
               <div class="compact-card pattern-card">
                 <div class="card-top">
-                  <span class="category-tag">${escapeHtml(p.category || "General")}</span>
+                  <span class="category-tag">${escapeHtml(p.category || t("text-default-category"))}</span>
                 </div>
                 <div class="card-body">
                   <p class="card-text">${escapeHtml(p.description || "")}</p>
@@ -1098,7 +1085,7 @@ async function refreshProfile() {
   });
 
   if (result.success) {
-    showToast(result.data.message, "success");
+    showToast(t("toast-profile-refresh-queued"), "success");
     await loadUserProfile();
   } else {
     showToast(result.error || t("toast-update-failed"), "error");
@@ -1133,6 +1120,8 @@ function escapeHtml(text) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  applyLanguage();
+
   document.getElementById("tab-project").addEventListener("click", () => switchView("project"));
   document.getElementById("tab-profile").addEventListener("click", () => switchView("profile"));
   document.getElementById("refresh-profile-btn")?.addEventListener("click", refreshProfile);

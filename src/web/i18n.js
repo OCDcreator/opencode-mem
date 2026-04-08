@@ -1,6 +1,12 @@
 const translations = {
   en: {
+    "document-title": "OpenCode Memory Explorer",
     title: "┌─ OPENCODE MEMORY EXPLORER ─┐",
+    "lang-toggle-title": "Switch language",
+    "repo-upstream": "Upstream",
+    "repo-fork": "My Fork",
+    "repo-upstream-title": "View upstream repository",
+    "repo-fork-title": "View custom fork repository",
     "tab-project": "PROJECT MEMORIES",
     "tab-profile": "USER PROFILE",
     "label-tag": "Tag:",
@@ -14,6 +20,7 @@ const translations = {
     "btn-deselect-all": "Deselect All",
     "btn-add-memory": "Add Memory",
     "section-project": "└─ PROJECT MEMORIES ({count}) ──",
+    "section-search": "└─ SEARCH RESULTS ({count}) ──",
     "section-profile": "└─ USER PROFILE ──",
     "section-add": "└─ ADD NEW MEMORY ──",
     "opt-all-tags": "All Tags",
@@ -72,8 +79,11 @@ const translations = {
     "confirm-dedup": "This will merge duplicate or highly similar memories. Continue?",
     "text-selected": "{count} selected",
     "text-page": "Page {current} of {total}",
-    "text-total": "Total: {count}",
+    "text-total": "Saved Memories: {count}",
+    "text-evidence-count": "{count} evidence",
+    "text-default-category": "General",
     "empty-memories": "No memories found",
+    "empty-profile": "No profile found yet. Keep chatting to build your profile.",
     "empty-changelog": "No changelog available",
     "status-cleanup": "Running cleanup...",
     "status-dedup": "Running deduplication...",
@@ -91,23 +101,38 @@ const translations = {
     "badge-linked": "LINKED",
     "date-created": "Created:",
     "date-updated": "Updated:",
+    "label-memory-id": "ID:",
     "empty-preferences": "No preferences learned yet",
     "empty-patterns": "No patterns detected yet",
     "empty-workflows": "No workflows identified yet",
     "btn-delete-pair": "Delete Pair",
     "btn-delete": "Delete",
+    "btn-history": "History",
+    "title-pin": "Pin",
+    "title-unpin": "Unpin",
     "text-generated-above": "Generated memory above",
     "text-from-below": "From prompt below",
     "btn-refresh": "Refresh",
+    "toast-profile-refresh-queued": "Profile refresh queued",
     "migration-found-tags": "Found {count} memories needing technical tags.",
     "migration-stopped": "Migration stopped: maximum attempts reached",
     "migration-shards-mismatch": "{count} shard(s) have different dimensions",
     "migration-dimension-mismatch": "dimension mismatch detected",
+    "migration-confirm-fresh":
+      "Run Fresh Start (Delete All) migration?\n\nThis operation is IRREVERSIBLE and will:\n- DELETE all existing memories\n- Remove all shards\n\nContinue?",
+    "migration-confirm-reembed":
+      "Run Re-embed (Preserve Data) migration?\n\nThis operation is IRREVERSIBLE and will:\n- Re-embed all memories with new model\n- This may take several minutes\n\nContinue?",
     "migration-mismatch-details":
       "Model mismatch: Config uses {configDimensions}D ({configModel}), but {shardInfo}.",
   },
   zh: {
+    "document-title": "OpenCode 记忆浏览器",
     title: "┌─ OPENCODE MEMORY EXPLORER ─┐",
+    "lang-toggle-title": "切换语言",
+    "repo-upstream": "上游仓库",
+    "repo-fork": "我的分叉",
+    "repo-upstream-title": "查看上游仓库",
+    "repo-fork-title": "查看当前分叉仓库",
     "tab-project": "项目记忆",
     "tab-profile": "用户画像",
     "label-tag": "标签:",
@@ -121,6 +146,7 @@ const translations = {
     "btn-deselect-all": "取消全选",
     "btn-add-memory": "添加记忆",
     "section-project": "└─ 项目记忆 ({count}) ──",
+    "section-search": "└─ 搜索结果 ({count}) ──",
     "section-profile": "└─ 用户画像 ──",
     "section-add": "└─ 添加新记忆 ──",
     "opt-all-tags": "所有标签",
@@ -177,8 +203,11 @@ const translations = {
     "confirm-dedup": "这将合并重复或高度相似的记忆。是否继续？",
     "text-selected": "已选择 {count} 条",
     "text-page": "第 {current} 页，共 {total} 页",
-    "text-total": "总计: {count}",
+    "text-total": "记忆总数: {count}",
+    "text-evidence-count": "{count} 条依据",
+    "text-default-category": "通用",
     "empty-memories": "未找到记忆",
+    "empty-profile": "暂未生成用户画像，继续聊天后会逐步建立。",
     "empty-changelog": "暂无更新日志",
     "status-cleanup": "正在运行清理...",
     "status-dedup": "正在运行去重...",
@@ -196,18 +225,27 @@ const translations = {
     "badge-linked": "已关联",
     "date-created": "创建于:",
     "date-updated": "更新于:",
+    "label-memory-id": "编号:",
     "empty-preferences": "尚未学习到偏好设置",
     "empty-patterns": "尚未检测到行为模式",
     "empty-workflows": "尚未识别出工作流程",
     "btn-delete-pair": "删除组合",
     "btn-delete": "删除",
+    "btn-history": "历史记录",
+    "title-pin": "置顶",
+    "title-unpin": "取消置顶",
     "text-generated-above": "由上方记忆生成",
     "text-from-below": "来自下方提示词",
     "btn-refresh": "刷新",
+    "toast-profile-refresh-queued": "已加入画像刷新队列",
     "migration-found-tags": "发现 {count} 条需要技术标签的记忆。",
     "migration-stopped": "迁移已停止：达到最大尝试次数",
     "migration-shards-mismatch": "{count} 个分片具有不同的维度",
     "migration-dimension-mismatch": "检测到维度不匹配",
+    "migration-confirm-fresh":
+      "执行“重新开始（删除所有）”迁移？\n\n此操作不可逆，并将会：\n- 删除所有现有记忆\n- 删除所有分片\n\n是否继续？",
+    "migration-confirm-reembed":
+      "执行“重新向量化（保留数据）”迁移？\n\n此操作不可逆，并将会：\n- 使用新模型重新向量化所有记忆\n- 这可能需要几分钟时间\n\n是否继续？",
     "migration-mismatch-details":
       "模型不匹配：配置使用 {configDimensions}D ({configModel})，但{shardInfo}。",
   },
@@ -234,6 +272,10 @@ function t(key, params = {}) {
 }
 
 function applyLanguage() {
+  const lang = getLanguage();
+  document.documentElement.lang = lang;
+  document.title = t("document-title");
+
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     const key = el.getAttribute("data-i18n");
     const translated = t(key);
@@ -259,6 +301,19 @@ function applyLanguage() {
     const key = el.getAttribute("data-i18n-placeholder");
     el.setAttribute("placeholder", t(key));
   });
+
+  document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+    const key = el.getAttribute("data-i18n-title");
+    el.setAttribute("title", t(key));
+  });
+}
+
+document.documentElement.lang = getLanguage();
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", applyLanguage, { once: true });
+} else {
+  applyLanguage();
 }
 
 window.t = t;

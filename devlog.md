@@ -3,6 +3,59 @@
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
 > 当前最新更新：2026-04-08
 
+## 2026-04-08 — Fix Web UI Language Persistence Drift And Clarify Memory Count Label
+
+### Changed files
+
+| File                 | Change                                                                                       |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| `devlog.md`          | Record the UI language-persistence fix and clearer stats wording                             |
+| `src/web/i18n.js`    | Add missing translation keys, apply saved language on initial load, and localize titles      |
+| `src/web/index.html` | Mark header tooltips and labels for translation so refresh does not leave mixed-language UI  |
+| `src/web/app.js`     | Replace hardcoded English dynamic strings with `t(...)` and use a clearer total-memory label |
+
+### 1. User-visible problem
+
+After switching the plugin Web UI to Chinese and refreshing the page, some
+parts of the interface could fall back to English again.
+
+Observed local symptoms:
+
+- the saved language choice was remembered, but not fully reapplied on reload
+- some dynamic strings still rendered in English even when the UI was in Chinese
+- the old stats label `总计` was too vague for a memory database overview
+
+### 2. Root cause
+
+Two separate issues were contributing to the mixed-language UI:
+
+- the saved language in `localStorage` was not being applied early enough during page initialization
+- several dynamic UI strings in `src/web/app.js` and header labels/tooltips in `src/web/index.html` were still hardcoded in English
+
+That meant refreshes could restore the language state only partially, leaving
+some visible English strings behind.
+
+### 3. Fix kept
+
+The UI localization path was tightened in a minimal way:
+
+- apply the saved language during initial load instead of only after manual toggle
+- sync `document.title`, `<html lang>`, placeholders, and tooltip titles through the same i18n path
+- move dynamic strings such as search headers, pin/unpin tooltips, history button text, evidence counts, default category labels, and profile empty-state text into translation keys
+- rename the stats label from `总计` to `记忆总数` so the meaning is clearer
+
+### 4. Verification
+
+Verified locally with:
+
+- `bun run build`
+
+Result:
+
+- the build succeeded
+- after refresh, Chinese UI text now stays consistent instead of partially reverting to English
+- the memory stats label now reads more clearly in both Chinese and English
+
 ## 2026-04-08 — Investigate OpenCode 1.4 Startup CPU Spike, Separate Plugin Bugs From Host Startup Load
 
 ### Changed files
