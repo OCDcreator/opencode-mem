@@ -24,6 +24,11 @@ import {
 
 const IDLE_CAPTURE_DELAY_MS = 10000;
 const MAX_IDLE_CAPTURE_PASSES = 10;
+const LOGGED_EVENT_TYPES = new Set(["session.status", "session.idle", "session.compacted"]);
+
+function shouldLogPluginEvent(eventType: string): boolean {
+  return process.env.OPENCODE_MEM_LOG_ALL_EVENTS === "1" || LOGGED_EVENT_TYPES.has(eventType);
+}
 
 export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
@@ -32,6 +37,7 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   let webServer: WebServer | null = null;
   const idleTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   const sessionStatuses = new Map<string, "idle" | "busy" | "retry">();
+  const globalScope = globalThis as Record<PropertyKey, unknown>;
 
   const clearIdleTimer = (sessionID: string, reason: string) => {
     const timer = idleTimeouts.get(sessionID);
@@ -103,6 +109,7 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
       void processIdleSession(sessionID, source);
     }, IDLE_CAPTURE_DELAY_MS);
+    timer.unref?.();
 
     idleTimeouts.set(sessionID, timer);
     log("Idle timer scheduled", {
@@ -116,44 +123,61 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   }
 
   const GLOBAL_PLUGIN_WARMUP_KEY = Symbol.for("opencode-mem.plugin.warmedup");
+  const GLOBAL_PLUGIN_WARMUP_IN_FLIGHT_KEY = Symbol.for("opencode-mem.plugin.warmup.inflight");
+  const GLOBAL_PROVIDER_STATE_IN_FLIGHT_KEY = Symbol.for("opencode-mem.provider-state.inflight");
 
-  if (!(globalThis as any)[GLOBAL_PLUGIN_WARMUP_KEY] && isConfigured()) {
-    (async () => {
+  if (
+    isConfigured() &&
+    !globalScope[GLOBAL_PLUGIN_WARMUP_KEY] &&
+    !globalScope[GLOBAL_PLUGIN_WARMUP_IN_FLIGHT_KEY]
+  ) {
+    globalScope[GLOBAL_PLUGIN_WARMUP_IN_FLIGHT_KEY] = true;
+
+    void (async () => {
       try {
         await memoryClient.warmup();
-        (globalThis as any)[GLOBAL_PLUGIN_WARMUP_KEY] = true;
+        globalScope[GLOBAL_PLUGIN_WARMUP_KEY] = true;
       } catch (error) {
-        log("Plugin warmup failed", { error: String(error) });
+        log("Plugin warmup failed", { error });
+      } finally {
+        delete globalScope[GLOBAL_PLUGIN_WARMUP_IN_FLIGHT_KEY];
       }
     })();
   }
 
   // Wire opencode state path and provider list — fire-and-forget to avoid blocking init
   // These calls can hang if opencode isn't fully bootstrapped yet
-  (async () => {
-    try {
-      const pathResult = await ctx.client.path.get();
-      if (pathResult.data?.state) {
-        setStatePath(pathResult.data.state);
+  if (!globalScope[GLOBAL_PROVIDER_STATE_IN_FLIGHT_KEY]) {
+    globalScope[GLOBAL_PROVIDER_STATE_IN_FLIGHT_KEY] = true;
+
+    void (async () => {
+      try {
+        const pathResult = await ctx.client.path.get();
+        if (pathResult.data?.state) {
+          setStatePath(pathResult.data.state);
+        }
+        if (pathResult.data?.config) {
+          setConfigPath(pathResult.data.config);
+        }
+        log("Initialized opencode paths", {
+          statePath: pathResult.data?.state,
+          configPath: pathResult.data?.config,
+        });
+
+        const providerResult = await ctx.client.provider.list();
+        if (providerResult.data?.connected) {
+          setConnectedProviders(providerResult.data.connected);
+        }
+        log("Initialized opencode provider state", {
+          connectedProviders: providerResult.data?.connected ?? [],
+        });
+      } catch (error) {
+        log("Failed to initialize opencode provider state", { error });
+      } finally {
+        delete globalScope[GLOBAL_PROVIDER_STATE_IN_FLIGHT_KEY];
       }
-      if (pathResult.data?.config) {
-        setConfigPath(pathResult.data.config);
-      }
-      log("Initialized opencode paths", {
-        statePath: pathResult.data?.state,
-        configPath: pathResult.data?.config,
-      });
-      const providerResult = await ctx.client.provider.list();
-      if (providerResult.data?.connected) {
-        setConnectedProviders(providerResult.data.connected);
-      }
-      log("Initialized opencode provider state", {
-        connectedProviders: providerResult.data?.connected ?? [],
-      });
-    } catch (error) {
-      log("Failed to initialize opencode provider state", { error: String(error) });
-    }
-  })();
+    })();
+  }
 
   if (CONFIG.webServerEnabled) {
     startWebServer({
@@ -484,7 +508,9 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
     event: async (input: { event: { type: string; properties?: any } }) => {
       const event = input.event;
-      log("Event received", { type: event.type, properties: event.properties });
+      if (shouldLogPluginEvent(event.type)) {
+        log("Event received", { type: event.type, properties: event.properties });
+      }
       if (event.type === "session.status") {
         const sessionID = event.properties?.sessionID;
         const statusType = event.properties?.status?.type;

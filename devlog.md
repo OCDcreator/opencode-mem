@@ -3,16 +3,104 @@
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
 > 当前最新更新：2026-04-08
 
+## 2026-04-08 — Investigate OpenCode 1.4 Startup CPU Spike, Separate Plugin Bugs From Host Startup Load
+
+### Changed files
+
+| File                                        | Change                                                                                                           |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `AGENTS.md`                                 | Record the OpenCode 1.4 startup CPU findings and maintenance rules                                               |
+| `opencode-local-plugin-loading.md`          | Cross-link the startup CPU investigation and distinguish loader vs host startup issues                           |
+| `opencode-1.4-startup-cpu-investigation.md` | Add a full incident write-up covering symptoms, A/B results, and review                                          |
+| `src/plugin.ts`                             | Keep lazy plugin export with `id` to satisfy the modern path-plugin contract                                     |
+| `src/services/web-server.ts`                | Keep Node HTTP bridge so Desktop accepts plugin web responses                                                    |
+| `src/index.ts`                              | Filter noisy event logging, `unref` idle timers, and keep only in-flight provider init dedupe                    |
+| `src/services/logger.ts`                    | Truncate large log payloads before writing local debug logs                                                      |
+| `src/services/embedding.ts`                 | `unref` timeout wrapper so non-critical timers do not hold the process                                           |
+| `src/services/language-detector.ts`         | Selectively absorb low-risk upstream ISO fallback improvements without replacing fork-specific path/script logic |
+| `tests/plugin-loader-contract.test.ts`      | Guard the `id` field and modern plugin export contract                                                           |
+| `tests/language-detector.test.ts`           | Add a regression guard for 3-letter language-name lookup                                                         |
+
+### 1. Why this investigation was necessary
+
+After the local-plugin/macOS loading work and a same-day upgrade to OpenCode
+`1.4.0`, the user observed:
+
+- startup error sounds
+- `127.0.0.1:4747` sometimes showing the Bun default page instead of the plugin UI
+- `opencode-cli` / Bun using a lot of CPU during startup
+
+Because these symptoms appeared near both a local plugin wrapper change and an
+OpenCode upgrade, the cause could not be assumed.
+
+### 2. What turned out to be real plugin bugs
+
+Several issues were confirmed as real plugin/runtime compatibility bugs:
+
+- local path-plugin loading required an explicit `id` and a safer lazy export path
+- the plugin Web UI needed a Node HTTP bridge because the Desktop sidecar rejected Bun `_Response` objects in this environment
+- the plugin was logging too many file-watcher events, which amplified startup noise and local log churn
+
+These are worth keeping because they fix deterministic failures, not just
+symptoms.
+
+### 3. What the A/B test showed
+
+A direct A/B test was run:
+
+1. disable the local plugin wrapper
+2. launch OpenCode and sample `opencode-cli`
+3. restore the wrapper
+4. relaunch and sample again
+
+Observed result:
+
+- without plugin: CPU delta stayed high over the same startup window
+- with plugin: CPU delta was very similar
+
+Conclusion:
+
+- the startup CPU spike was **not primarily caused by this plugin**
+- the plugin had real bugs, but the large startup CPU cost mostly remained even without it
+
+### 4. What was causing startup noise outside this repo
+
+Two local OpenCode configuration issues were also found:
+
+- duplicate skills existed in both `~/.claude/skills/` and `~/.config/opencode/skills/`
+- several MCP servers errored on `prompts/list` during startup
+
+Those were cleaned up in local user config (outside this repo), and the
+duplicate-skill / failed-prompts startup noise disappeared from the Desktop
+logs afterward.
+
+### 5. Review of the repo changes
+
+The final code review conclusion was:
+
+- keep the proven compatibility fixes (`src/plugin.ts`, `src/services/web-server.ts`, loader test)
+- keep the log-noise reductions (`src/index.ts`, `src/services/logger.ts`)
+- keep `unref` on non-critical timers
+- avoid over-freezing startup state
+
+One adjustment was made during review:
+
+- provider-state initialization now deduplicates only **concurrent** startup work
+- it no longer assumes one successful initialization should permanently block later refreshes
+
+That is a safer compromise given that provider state can change while the host
+process stays alive.
+
 ## 2026-04-08 — Verify Local Plugin Loading Against OpenCode Source And Document The Correct Path
 
 ### Changed files
 
-| File                              | Change                                                               |
-| --------------------------------- | -------------------------------------------------------------------- |
-| `tsconfig.json`                   | Add Bun type declarations so `bun run build` succeeds again          |
-| `AGENTS.md`                       | Record source-verified local plugin loading rules and wrapper shape  |
-| `devlog.md`                       | Record the verified loader diagnosis and minimal fix                 |
-| `opencode-local-plugin-loading.md`| Add a future-maintainer playbook for loading this plugin correctly   |
+| File                               | Change                                                              |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `tsconfig.json`                    | Add Bun type declarations so `bun run build` succeeds again         |
+| `AGENTS.md`                        | Record source-verified local plugin loading rules and wrapper shape |
+| `devlog.md`                        | Record the verified loader diagnosis and minimal fix                |
+| `opencode-local-plugin-loading.md` | Add a future-maintainer playbook for loading this plugin correctly  |
 
 ### 1. User-visible symptom
 

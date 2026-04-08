@@ -9,6 +9,12 @@ question quickly:
 > How do I make `opencode-mem` load normally inside OpenCode without breaking
 > the Windows-friendly fork behavior?
 
+Related note:
+
+- If the symptom is primarily "OpenCode 1.4 startup CPU is high" rather than
+  "the plugin does not load", read `opencode-1.4-startup-cpu-investigation.md`
+  as well.
+
 ## 1. Source-verified loader rules
 
 Source-of-truth OpenCode repo on this machine:
@@ -214,6 +220,23 @@ Meaning:
 
 - usually not a loader bug
 - the short-lived OpenCode command already exited and disposed the project instance
+
+### OpenCode starts but CPU is still high
+
+Meaning:
+
+- not necessarily a plugin-loader problem
+- the host may be doing its own startup work even if this plugin is disabled
+
+Check:
+
+- whether A/B testing with the local wrapper temporarily disabled changes startup CPU materially
+- whether Desktop logs show duplicate skills under multiple directories
+- whether MCP servers are failing `prompts/list` during startup
+
+If the CPU spike remains similar with the wrapper disabled, treat that as a host
+startup/config investigation first, not a proof that this repo's runtime logic
+is still wrong.
 
 ## 7. Minimality rule for future agents
 

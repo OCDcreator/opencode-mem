@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { detectLanguage } from "../src/services/language-detector";
+import { detectLanguage, getLanguageName } from "../src/services/language-detector";
 
 describe("detectLanguage", () => {
   it("maps Chinese prompts to zh", () => {
@@ -16,5 +16,11 @@ describe("detectLanguage", () => {
 
   it("keeps Cyrillic prompts as Russian", () => {
     expect(detectLanguage("Почему последняя память записалась по-русски?")).toBe("ru");
+  });
+});
+
+describe("getLanguageName", () => {
+  it("supports 3-letter ISO lookups from upstream-compatible fallbacks", () => {
+    expect(getLanguageName("cmn").toLowerCase()).toContain("chinese");
   });
 });

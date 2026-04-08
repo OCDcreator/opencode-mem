@@ -207,6 +207,40 @@ Practical rule:
 - When debugging loading, inspect the OpenCode source or logs before changing plugin runtime logic.
 - Treat the local wrapper contract as part of the deployed system, even though it lives outside this repo.
 
+### 2.10 OpenCode 1.4 startup CPU investigation separated plugin bugs from host startup load
+
+Files:
+
+- `src/plugin.ts`
+- `src/services/web-server.ts`
+- `src/index.ts`
+- `src/services/logger.ts`
+- `src/services/embedding.ts`
+- `opencode-1.4-startup-cpu-investigation.md`
+
+Important change:
+
+- A direct A/B test showed that the large startup CPU spike remained similar even with the local plugin wrapper disabled.
+- This means the plugin had real compatibility/logging bugs, but the main startup CPU spike was not primarily caused by this repo alone.
+- The repo still kept the fixes that were clearly justified:
+  - lazy plugin export with explicit `id`
+  - Node HTTP bridge for the plugin Web UI
+  - filtered event logging instead of logging every watcher event
+  - `unref?.()` on non-critical timers
+  - only **in-flight** deduplication for provider-state init, not permanent one-time freezing
+
+Why this matters:
+
+- It is easy to overfit a startup-performance investigation and accidentally preserve the wrong workaround.
+- The point of the final patch set is not "blame the plugin"; it is "keep the fixes backed by evidence and avoid speculative changes."
+
+Practical rule:
+
+- If OpenCode startup CPU suddenly spikes after a host upgrade, first do an A/B run with the local wrapper disabled before changing plugin business logic.
+- If the spike remains similar without the plugin, inspect local OpenCode config for duplicate skills and noisy MCP startup failures before adding more repo-side complexity.
+- Do not reintroduce blanket event logging for `file.watcher.updated` unless you are doing a short-lived targeted debug session.
+- If provider-state init is revisited, keep deduplication limited to concurrent startup work unless you have proof that later refreshes are unnecessary.
+
 ## 3. Current Known-Good Runtime Configuration
 
 The current local environment is configured to use:
@@ -278,6 +312,7 @@ Current behavior:
 - Plugin init calls `initConfig(directory)` and computes project/user tags.
 - Memory warmup is started in the background and should not block plugin startup.
 - OpenCode state path and connected provider list are fetched asynchronously and stored through `src/services/ai/opencode-state.ts`.
+- Provider-state init now deduplicates only concurrent startup work; it does not assume one successful init should permanently block later refreshes.
 - The web server is started independently when enabled.
 
 Why this matters:
@@ -334,11 +369,13 @@ Primary file: `src/services/logger.ts`
 Current behavior:
 
 - Logs are written to `~/.opencode-mem/opencode-mem.log` unless `OPENCODE_MEM_LOG_FILE` overrides the destination.
-- New logs now include event names, auto-capture phase transitions, and OpenAI-compatible raw/parsed JSON excerpts.
+- New logs now include selected event names, auto-capture phase transitions, and OpenAI-compatible raw/parsed JSON excerpts.
+- Large payloads are truncated before being written.
 
 Why this matters:
 
 - The log file is now the first place to inspect when idle capture or provider parsing behaves unexpectedly.
+- Logging every watcher event can become its own performance problem after host-side event-flow changes.
 - The log file may contain prompt snippets or model-returned content, so handle it as local-sensitive debugging output.
 
 ## 6. Auto-Capture / Memory Model Rules
@@ -490,6 +527,19 @@ Practical rule:
 - Do not paste or publish the log file casually.
 - If logs must be shared, sanitize them first.
 
+### 8.5 OpenCode startup noise can come from outside this repo
+
+Important local behavior observed during the OpenCode `1.4.0` investigation:
+
+- Duplicate skills under both `~/.claude/skills/` and `~/.config/opencode/skills/` created startup warnings and extra scanning.
+- Several MCP servers on this machine errored during startup because OpenCode probes `prompts/list` and those servers did not implement that method.
+- Those issues can make Desktop startup look like a plugin problem even when the plugin is not the primary CPU source.
+
+Practical rule:
+
+- If startup CPU or fan noise suddenly appears after an OpenCode upgrade, inspect Desktop logs for duplicate-skill warnings and MCP `prompts/list` errors before making deeper repo-side changes.
+- Keep local config hygiene in mind when evaluating plugin startup regressions.
+
 ## 9. Files Future Agents Should Inspect First
 
 When working on this fork, start with:
@@ -506,6 +556,7 @@ When working on this fork, start with:
 - `src/web/index.html`
 - `src/web/styles.css`
 - `opencode-local-plugin-loading.md`
+- `opencode-1.4-startup-cpu-investigation.md`
 - `~/.config/opencode/opencode.json`
 - `~/.config/opencode/plugins/opencode-mem.js`
 

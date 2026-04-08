@@ -3,8 +3,10 @@ import { iso6393, iso6393To1 } from "iso-639-3";
 
 const ISO3_TO1_OVERRIDES: Record<string, string> = {
   ara: "ar",
+  arz: "ar",
   arb: "ar",
   cmn: "zh",
+  hbs: "sr",
   kor: "ko",
   jpn: "ja",
   rus: "ru",
@@ -76,6 +78,9 @@ export function detectLanguage(text: string): string {
 }
 
 export function getLanguageName(code: string): string {
-  const lang = iso6393.find((l: any) => l.iso6391 === code);
+  let lang = iso6393.find((l: any) => l.iso6391 === code);
+  if (!lang) {
+    lang = iso6393.find((l: any) => l.iso6393 === code);
+  }
   return lang?.name || "English";
 }

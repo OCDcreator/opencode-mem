@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "./logger.js";
@@ -38,7 +39,7 @@ interface WebServerConfig {
 }
 
 export class WebServer {
-  private server: ReturnType<typeof Bun.serve> | null = null;
+  private server: Server | null = null;
   private config: WebServerConfig;
   private isOwner: boolean = false;
   private startPromise: Promise<void> | null = null;
@@ -68,11 +69,32 @@ export class WebServer {
     }
 
     try {
-      this.server = Bun.serve({
-        port: this.config.port,
-        hostname: this.config.host,
-        fetch: this.handleRequest.bind(this),
+      const server = createServer((req, res) => {
+        void this.handleNodeRequest(req, res);
       });
+
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = () => {
+          server.off("error", onError);
+          server.off("listening", onListening);
+        };
+
+        const onError = (error: Error) => {
+          cleanup();
+          reject(error);
+        };
+
+        const onListening = () => {
+          cleanup();
+          resolve();
+        };
+
+        server.on("error", onError);
+        server.on("listening", onListening);
+        server.listen(this.config.port, this.config.host);
+      });
+
+      this.server = server;
       this.isOwner = true;
     } catch (error) {
       const errorMsg = String(error);
@@ -107,6 +129,7 @@ export class WebServer {
         await this.attemptTakeover();
       }
     }, 5000);
+    this.healthCheckInterval.unref?.();
   }
 
   private stopHealthCheckLoop(): void {
@@ -119,7 +142,10 @@ export class WebServer {
   private async attemptTakeover(): Promise<void> {
     // prevent thundering herd: multiple non-owners racing to bind port
     const jitterMs = 500 + Math.random() * 1000;
-    await new Promise((resolve) => setTimeout(resolve, jitterMs));
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, jitterMs);
+      timer.unref?.();
+    });
 
     if (await this.checkServerAvailable()) {
       this.startHealthCheckLoop();
@@ -154,7 +180,16 @@ export class WebServer {
       return;
     }
 
-    this.server.stop();
+    const server = this.server;
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
     this.server = null;
     this.isOwner = false;
   }
@@ -184,6 +219,64 @@ export class WebServer {
   }
 
   // --- HTTP request handling (inlined from web-server-worker.ts) ---
+
+  private async handleNodeRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    try {
+      const request = await this.buildRequest(req);
+      const response = await this.handleRequest(request);
+      await this.writeNodeResponse(res, response);
+    } catch (error) {
+      const fallback = this.jsonResponse(
+        {
+          success: false,
+          error: String(error),
+        },
+        500
+      );
+      await this.writeNodeResponse(res, fallback);
+    }
+  }
+
+  private async buildRequest(req: IncomingMessage): Promise<Request> {
+    const method = req.method || "GET";
+    const url = new URL(req.url || "/", this.getUrl());
+
+    if (method === "GET" || method === "HEAD") {
+      return new Request(url.toString(), {
+        method,
+        headers: req.headers as any,
+      });
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    const body = chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+
+    return new Request(url.toString(), {
+      method,
+      headers: req.headers as any,
+      body,
+      duplex: "half",
+    });
+  }
+
+  private async writeNodeResponse(res: ServerResponse, response: Response): Promise<void> {
+    res.statusCode = response.status;
+    response.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+
+    if (!response.body) {
+      res.end();
+      return;
+    }
+
+    const body = Buffer.from(await response.arrayBuffer());
+    res.end(body);
+  }
 
   private async handleRequest(req: Request): Promise<Response> {
     const url = new URL(req.url);
