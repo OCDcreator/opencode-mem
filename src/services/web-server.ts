@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join, dirname } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { log } from "./logger.js";
 import {
@@ -304,6 +304,25 @@ export class WebServer {
         return this.serveStaticFile("favicon.ico", "image/x-icon");
       }
 
+      if (path.startsWith("/vendor/")) {
+        const vendorFile = path.slice("/".length);
+        return this.serveWebAsset(vendorFile);
+      }
+
+      if (path === "/docs" || path === "/docs/") {
+        return this.serveDocsFile("overview/index.md");
+      }
+
+      if (path.startsWith("/docs/")) {
+        let docsPath = path.slice("/docs/".length);
+        try {
+          docsPath = decodeURIComponent(docsPath);
+        } catch {
+          return new Response("Bad Request", { status: 400 });
+        }
+        return this.serveDocsFile(docsPath);
+      }
+
       if (path === "/api/tags" && method === "GET") {
         const result = await handleListTags();
         return this.jsonResponse(result);
@@ -519,6 +538,100 @@ export class WebServer {
     } catch (error) {
       return new Response("File not found", { status: 404 });
     }
+  }
+
+  private serveWebAsset(relativePath: string): Response {
+    try {
+      const webDir = resolve(join(__dirname, "..", "web"));
+      const normalizedRelativePath = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+
+      if (!normalizedRelativePath || normalizedRelativePath.includes("..")) {
+        return new Response("Not Found", { status: 404 });
+      }
+
+      const filePath = resolve(join(webDir, normalizedRelativePath));
+      const insideWebDir =
+        filePath === webDir ||
+        filePath.startsWith(`${webDir}/`) ||
+        filePath.startsWith(`${webDir}\\`);
+
+      if (!insideWebDir || !existsSync(filePath)) {
+        return new Response("Not Found", { status: 404 });
+      }
+
+      const content = readFileSync(filePath);
+
+      return new Response(content, {
+        headers: {
+          "Content-Type": this.getDocsContentType(filePath),
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
+    } catch (error) {
+      return new Response("File not found", { status: 404 });
+    }
+  }
+
+  private serveDocsFile(relativePath: string): Response {
+    try {
+      const normalizedRelativePath = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+
+      if (!normalizedRelativePath || normalizedRelativePath.includes("..")) {
+        return new Response("Not Found", { status: 404 });
+      }
+
+      for (const docsDir of this.getDocsDirectories()) {
+        const filePath = resolve(join(docsDir, normalizedRelativePath));
+        const insideDocsDir =
+          filePath === docsDir ||
+          filePath.startsWith(`${docsDir}/`) ||
+          filePath.startsWith(`${docsDir}\\`);
+
+        if (!insideDocsDir || !existsSync(filePath)) {
+          continue;
+        }
+
+        const content = readFileSync(filePath);
+
+        return new Response(content, {
+          headers: {
+            "Content-Type": this.getDocsContentType(filePath),
+            "Cache-Control": "no-cache",
+          },
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    } catch (error) {
+      return new Response("File not found", { status: 404 });
+    }
+  }
+
+  private getDocsDirectories(): string[] {
+    return [
+      resolve(join(__dirname, "..", "web", "docs")),
+      resolve(join(__dirname, "..", "..", "docs")),
+      resolve(join(__dirname, "..", "..", "src", "web", "docs")),
+    ];
+  }
+
+  private getDocsContentType(filePath: string): string {
+    const extension = extname(filePath).toLowerCase();
+    const map: Record<string, string> = {
+      ".md": "text/markdown; charset=utf-8",
+      ".json": "application/json; charset=utf-8",
+      ".txt": "text/plain; charset=utf-8",
+      ".html": "text/html; charset=utf-8",
+      ".css": "text/css; charset=utf-8",
+      ".js": "application/javascript; charset=utf-8",
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+      ".svg": "image/svg+xml",
+      ".webp": "image/webp",
+    };
+
+    return map[extension] || "application/octet-stream";
   }
 
   private jsonResponse(data: any, status: number = 200): Response {

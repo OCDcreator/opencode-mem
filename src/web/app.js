@@ -1,4 +1,78 @@
 const API_BASE = "";
+const DOCS_ROUTE_PREFIX = "#/docs/";
+const DEFAULT_DOC_SLUG = "overview/index";
+const DOCS_TREE = [
+  {
+    titleKey: "docs-group-overview",
+    items: [
+      { slug: "overview/index", relativePath: "overview/index.md", labelKey: "docs-item-overview" },
+    ],
+  },
+  {
+    titleKey: "docs-group-usage",
+    items: [
+      {
+        slug: "memories/project-memories",
+        relativePath: "memories/project-memories.md",
+        labelKey: "docs-item-project-memories",
+      },
+      {
+        slug: "memories/manual-memory",
+        relativePath: "memories/manual-memory.md",
+        labelKey: "docs-item-manual-memory",
+      },
+      {
+        slug: "auto-capture/auto-capture",
+        relativePath: "auto-capture/auto-capture.md",
+        labelKey: "docs-item-auto-capture",
+      },
+      {
+        slug: "profile/user-profile",
+        relativePath: "profile/user-profile.md",
+        labelKey: "docs-item-user-profile",
+      },
+      {
+        slug: "storage/memory-search",
+        relativePath: "storage/memory-search.md",
+        labelKey: "docs-item-storage",
+      },
+    ],
+  },
+  {
+    titleKey: "docs-group-setup",
+    items: [
+      {
+        slug: "configuration/setup-guide",
+        relativePath: "configuration/setup-guide.md",
+        labelKey: "docs-item-setup-guide",
+      },
+      {
+        slug: "embedding/embedding-modes",
+        relativePath: "embedding/embedding-modes.md",
+        labelKey: "docs-item-embedding",
+      },
+      {
+        slug: "providers/opencode-provider",
+        relativePath: "providers/opencode-provider.md",
+        labelKey: "docs-item-provider",
+      },
+    ],
+  },
+  {
+    titleKey: "docs-group-troubleshooting",
+    items: [
+      {
+        slug: "troubleshooting/logging",
+        relativePath: "troubleshooting/logging.md",
+        labelKey: "docs-item-logging",
+      },
+    ],
+  },
+];
+const DOCS_LOOKUP = DOCS_TREE.flatMap((group) => group.items).reduce((acc, item) => {
+  acc[item.slug] = item;
+  return acc;
+}, {});
 
 const state = {
   tags: { project: [] },
@@ -14,6 +88,9 @@ const state = {
   selectedMemories: new Set(),
   autoRefreshInterval: null,
   userProfile: null,
+  docsCurrentSlug: DEFAULT_DOC_SLUG,
+  docsRequestId: 0,
+  docsModalOpen: false,
 };
 
 marked.setOptions({
@@ -582,6 +659,202 @@ function closeModal() {
   document.getElementById("edit-modal").classList.add("hidden");
 }
 
+function normalizeDocSlug(rawSlug) {
+  let slug = String(rawSlug || "").trim();
+
+  try {
+    slug = decodeURIComponent(slug);
+  } catch {
+    // Keep original value when URI decode fails
+  }
+
+  slug = slug.replace(/^\/+|\/+$/g, "");
+  slug = slug.replace(/\.md$/i, "");
+
+  if (slug.startsWith("docs/")) {
+    slug = slug.slice(5);
+  }
+
+  if (!slug) {
+    return DEFAULT_DOC_SLUG;
+  }
+
+  return DOCS_LOOKUP[slug] ? slug : DEFAULT_DOC_SLUG;
+}
+
+function getDocSlugFromHash() {
+  if (!window.location.hash.startsWith(DOCS_ROUTE_PREFIX)) {
+    return null;
+  }
+
+  const raw = window.location.hash.slice(DOCS_ROUTE_PREFIX.length);
+  return normalizeDocSlug(raw);
+}
+
+function setDocsModalOpen(open) {
+  state.docsModalOpen = open;
+  const modal = document.getElementById("docs-modal");
+  if (!modal) return;
+  modal.classList.toggle("hidden", !open);
+}
+
+function renderDocsSidebar() {
+  const sidebar = document.getElementById("docs-sidebar");
+  if (!sidebar) return;
+
+  sidebar.innerHTML = DOCS_TREE.map((group) => {
+    const itemsHtml = group.items
+      .map((item) => {
+        const activeClass = item.slug === state.docsCurrentSlug ? "active" : "";
+        return `<button class="docs-nav-item ${activeClass}" type="button" data-doc-slug="${item.slug}">${escapeHtml(t(item.labelKey))}</button>`;
+      })
+      .join("");
+
+    return `
+      <div class="docs-nav-group">
+        <div class="docs-nav-group-title-row">
+          <span class="docs-nav-group-dot"></span>
+          <div class="docs-nav-group-title">${escapeHtml(t(group.titleKey))}</div>
+        </div>
+        <div class="docs-nav-list">${itemsHtml}</div>
+      </div>
+    `;
+  }).join("");
+
+  sidebar.querySelectorAll(".docs-nav-item").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const target = event.currentTarget;
+      const slug = target?.dataset?.docSlug || DEFAULT_DOC_SLUG;
+      setDocsRoute(slug);
+    });
+  });
+}
+
+function getDocRequestPaths(doc) {
+  const lang = getLanguage();
+  const paths = [];
+
+  if (lang === "en") {
+    paths.push(`/docs/en/${doc.relativePath}`);
+    paths.push(`/docs/${doc.relativePath}`);
+  } else {
+    paths.push(`/docs/${doc.relativePath}`);
+    paths.push(`/docs/en/${doc.relativePath}`);
+  }
+
+  return [...new Set(paths)];
+}
+
+async function renderDocContent(slug) {
+  const normalizedSlug = normalizeDocSlug(slug);
+  const doc = DOCS_LOOKUP[normalizedSlug] || DOCS_LOOKUP[DEFAULT_DOC_SLUG];
+  const content = document.getElementById("docs-content");
+  const title = document.getElementById("docs-current-title");
+
+  if (!content || !title) return;
+
+  state.docsCurrentSlug = doc.slug;
+  renderDocsSidebar();
+  title.textContent = t(doc.labelKey);
+
+  const requestId = ++state.docsRequestId;
+  content.innerHTML = `<div class="loading">${t("loading-docs")}</div>`;
+
+  try {
+    let markdown = null;
+
+    for (const path of getDocRequestPaths(doc)) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch(path, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          continue;
+        }
+        markdown = await response.text();
+        break;
+      } catch {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    if (!markdown) {
+      throw new Error("Document unavailable");
+    }
+
+    if (requestId !== state.docsRequestId) {
+      return;
+    }
+
+    content.innerHTML = renderMarkdown(markdown);
+    content.scrollTop = 0;
+
+    content.querySelectorAll("a[href^='/docs/']").forEach((anchor) => {
+      const href = anchor.getAttribute("href") || "";
+      const mdMatch = href.match(/^\/docs\/(.+)\.md$/i);
+      if (!mdMatch || !mdMatch[1]) return;
+      const nextSlug = normalizeDocSlug(mdMatch[1]);
+
+      anchor.setAttribute("href", `${DOCS_ROUTE_PREFIX}${nextSlug}`);
+      anchor.addEventListener("click", (event) => {
+        event.preventDefault();
+        setDocsRoute(nextSlug);
+      });
+    });
+  } catch (error) {
+    if (requestId !== state.docsRequestId) {
+      return;
+    }
+    content.innerHTML = `<div class="error-state">${t("docs-load-error")}</div>`;
+  }
+}
+
+async function syncDocsFromRoute() {
+  const slug = getDocSlugFromHash();
+  if (!slug) {
+    setDocsModalOpen(false);
+    return;
+  }
+
+  setDocsModalOpen(true);
+  await renderDocContent(slug);
+}
+
+function setDocsRoute(slug, replace = false) {
+  const normalized = normalizeDocSlug(slug);
+  const nextHash = `${DOCS_ROUTE_PREFIX}${normalized}`;
+
+  if (replace) {
+    history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}${nextHash}`
+    );
+    void syncDocsFromRoute();
+    return;
+  }
+
+  if (window.location.hash === nextHash) {
+    void syncDocsFromRoute();
+    return;
+  }
+
+  window.location.hash = nextHash;
+}
+
+function openDocsModal() {
+  setDocsRoute(state.docsCurrentSlug || DEFAULT_DOC_SLUG);
+}
+
+function closeDocsModal() {
+  setDocsModalOpen(false);
+
+  if (window.location.hash.startsWith(DOCS_ROUTE_PREFIX)) {
+    history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }
+}
+
 function performSearch() {
   const query = document.getElementById("search-input").value.trim();
 
@@ -1124,9 +1397,20 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("tab-project").addEventListener("click", () => switchView("project"));
   document.getElementById("tab-profile").addEventListener("click", () => switchView("profile"));
+  document.getElementById("project-docs-btn")?.addEventListener("click", openDocsModal);
   document.getElementById("refresh-profile-btn")?.addEventListener("click", refreshProfile);
   document.getElementById("changelog-close")?.addEventListener("click", () => {
     document.getElementById("changelog-modal").classList.add("hidden");
+  });
+  document.getElementById("docs-modal-close")?.addEventListener("click", closeDocsModal);
+  document.getElementById("docs-modal")?.addEventListener("click", (e) => {
+    if (e.target?.id === "docs-modal") {
+      closeDocsModal();
+    }
+  });
+
+  window.addEventListener("hashchange", () => {
+    void syncDocsFromRoute();
   });
 
   document.getElementById("lang-toggle").addEventListener("click", () => {
@@ -1137,6 +1421,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     loadMemories();
     loadStats();
     if (state.currentView === "profile") loadUserProfile();
+    if (state.docsModalOpen) {
+      renderDocsSidebar();
+      const doc = DOCS_LOOKUP[state.docsCurrentSlug];
+      const title = document.getElementById("docs-current-title");
+      if (doc && title) {
+        title.textContent = t(doc.labelKey);
+      }
+      void renderDocContent(state.docsCurrentSlug);
+    }
   });
 
   document.getElementById("lang-toggle").textContent = getLanguage().toUpperCase();
@@ -1187,6 +1480,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("edit-modal").addEventListener("click", (e) => {
     if (e.target.id === "edit-modal") closeModal();
   });
+
+  await syncDocsFromRoute();
 
   await loadTags();
   await loadMemories();

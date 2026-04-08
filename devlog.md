@@ -3,6 +3,107 @@
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
 > 当前最新更新：2026-04-08
 
+## 2026-04-08 — Add In-App Project Documentation, Local Web Assets, And User-Facing Setup Guides
+
+### Changed files
+
+| File                         | Change                                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| `AGENTS.md`                  | Shrink the root maintenance guide into a compact index that points to focused reference docs  |
+| `docs/agent-reference/*.md`  | Split fork deltas, runtime config, and machine-local operations into targeted maintainer docs |
+| `devlog.md`                  | Record the new in-app documentation system and follow-up clarifications                       |
+| `docs/**`                    | Add a user-facing documentation tree in Chinese and English                                   |
+| `src/web/index.html`         | Add the “了解该项目 / Learn This Project” button and docs modal shell                         |
+| `src/web/app.js`             | Add docs sidebar routing, language-aware doc loading, and current-page re-render on lang swap |
+| `src/web/styles.css`         | Add docs modal layout and strengthen sidebar hierarchy styling                                |
+| `src/web/i18n.js`            | Add docs-related labels and navigation strings in both languages                              |
+| `src/web/vendor/*`           | Vendor `lucide`, `marked`, `DOMPurify`, and `jsonrepair` locally                              |
+| `src/services/web-server.ts` | Serve `/docs/**` and local `/vendor/**` assets safely                                         |
+| `scripts/build.mjs`          | Copy root `docs/` into `dist/web/docs` during build                                           |
+
+### 1. Why this work was needed
+
+The Web UI previously had no built-in help surface explaining what the plugin
+does, how to use its major features, or how to configure it.
+
+The first documentation pass also turned out to be too maintenance-oriented:
+
+- it described internals more than user outcomes
+- it did not explain manual memory creation, project memories, or user profile clearly enough
+- it did not show step-by-step setup for provider/model configuration
+- it did not explain the difference between global config, project-level overrides, global logs, and project-local data paths
+
+At the same time, the browser was emitting Tracking Prevention warnings because
+the Web UI loaded core frontend libraries from third-party CDNs.
+
+### 2. What was added to the Web UI
+
+The Web UI now includes a dedicated in-app documentation entry point:
+
+- a new top-right “了解该项目 / Learn This Project” button
+- a modal documentation window with a fixed left sidebar and Markdown content pane
+- lightweight hash routing for docs pages
+- language-aware document loading so the docs content follows the UI language
+
+The sidebar hierarchy was also strengthened so section headings and leaf pages
+are visually easier to distinguish.
+
+### 3. What changed in the docs themselves
+
+A new `docs/` tree was introduced and then expanded into a more complete
+user-facing help system.
+
+`AGENTS.md` was also slimmed down into a compact entry point so future
+maintainers can jump straight to focused reference docs instead of scrolling a
+single monolithic maintenance file. Those split references now live under
+`docs/agent-reference/`.
+
+The docs now cover:
+
+- project overview and what the plugin is for
+- project memories page usage
+- manual memory creation as the practical “force save this now” path
+- auto-capture behavior
+- user profile meaning and expectations
+- storage/search usage
+- setup guide
+- provider configuration
+- embedding modes
+- logging/debugging
+
+An English mirror was added under `docs/en/` so docs content can switch with
+the Web UI language.
+
+Two especially important clarifications were added after user feedback:
+
+- local embedding model support was **not removed**; `embeddingModel` still supports local Xenova models
+- project-level config support exists, but logs remain global by default unless `OPENCODE_MEM_LOG_FILE` is explicitly set
+
+### 4. Runtime/packaging changes kept
+
+To make the docs and UI stable inside the local plugin runtime:
+
+- `/docs/**` is now served directly by the plugin web server
+- docs file lookup tolerates packaged and source-tree layouts
+- frontend vendor libraries are now served from local `src/web/vendor/` copies instead of external CDNs
+- build output now includes `dist/web/docs`
+
+This removes the browser Tracking Prevention noise from CDN script loads and
+makes the documentation available to the in-app Web UI reliably.
+
+### 5. Verification
+
+Verified locally with:
+
+- `bun run build`
+
+Result:
+
+- the build succeeded
+- `dist/web/docs` now contains the generated user docs
+- `dist/web/vendor` now contains the local frontend libraries
+- the documentation system is packaged with the plugin instead of relying on external web assets
+
 ## 2026-04-08 — Fix Web UI Language Persistence Drift And Clarify Memory Count Label
 
 ### Changed files

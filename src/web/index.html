@@ -6,10 +6,10 @@
     <title>OpenCode Memory Explorer</title>
     <link rel="stylesheet" href="/styles.css" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked@17.0.1/lib/marked.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.2/dist/purify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jsonrepair@latest/lib/umd/jsonrepair.min.js"></script>
+    <script src="/vendor/lucide.min.js"></script>
+    <script src="/vendor/marked.umd.min.js"></script>
+    <script src="/vendor/purify.min.js"></script>
+    <script src="/vendor/jsonrepair.min.js"></script>
     <script src="/i18n.js"></script>
   </head>
   <body>
@@ -50,6 +50,16 @@
                 <span data-i18n="repo-fork">My Fork</span>
               </a>
             </div>
+            <button
+              id="project-docs-btn"
+              class="repo-link repo-link-docs"
+              type="button"
+              title="Learn this project"
+              data-i18n-title="project-docs-title"
+            >
+              <i data-lucide="book-open" class="icon"></i>
+              <span data-i18n="project-docs">Learn This Project</span>
+            </button>
           </div>
         </div>
         <div class="stats-bar">
@@ -302,6 +312,26 @@
         </div>
         <div id="changelog-list" class="changelog-list">
           <div class="loading" data-i18n="loading-changelog">Loading changelog...</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="docs-modal" class="modal hidden">
+      <div class="modal-content docs-modal-content">
+        <div class="modal-header">
+          <h3 data-i18n="modal-docs-title">Project Guide</h3>
+          <button class="modal-close" id="docs-modal-close">
+            <i data-lucide="x" class="icon"></i>
+          </button>
+        </div>
+        <div class="docs-layout">
+          <aside id="docs-sidebar" class="docs-sidebar"></aside>
+          <section class="docs-main">
+            <div id="docs-current-title" class="docs-current-title"></div>
+            <div id="docs-content" class="docs-content markdown-content">
+              <div class="loading" data-i18n="loading-docs">Loading docs...</div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
