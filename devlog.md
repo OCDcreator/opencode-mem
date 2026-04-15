@@ -1,7 +1,133 @@
 # Development Log
 
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
-> 当前最新更新：2026-04-08
+> 当前最新更新：2026-04-16
+
+## 2026-04-16 — Migrate Local Embedding Runtime To `@huggingface/transformers`, Recheck macOS Risk, And Repair Local Husky Runtime
+
+### Changed files
+
+| File                                     | Change                                                                                                   |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `devlog.md`                              | Record the embedding package migration, macOS review, Husky repair, and validation status                |
+| `README.md`                              | Clarify fork-vs-upstream differences and document the current cross-platform positioning                 |
+| `package.json`                           | Replace `@xenova/transformers` with `@huggingface/transformers`                                          |
+| `bun.lock`                               | Refresh dependency lockfile after the transformer package swap                                           |
+| `src/services/embedding.ts`              | Keep lazy local-model loading but import `@huggingface/transformers` instead of `@xenova/transformers`   |
+| `docs/agent-reference/fork-deltas.md`    | Update maintainer notes for the new embedding package and current startup/platform implications          |
+| `docs/agent-reference/runtime-config.md` | Update runtime guidance so local embedding notes reflect the new package while keeping current model IDs |
+
+### 1. Why this change was needed
+
+The fork already had the important behavioral fix of **not** importing the
+local embedding runtime at module top-level.
+
+However, the dependency itself still pointed at `@xenova/transformers`, whose
+older `sharp` chain remained fragile in plugin install paths that use
+`--ignore-scripts`.
+
+That mattered for this fork because its maintenance goal is not just
+Windows-first local development, but also **macOS parity** and stable plugin
+startup in real OpenCode environments.
+
+### 2. What changed in runtime behavior
+
+The local embedding loader keeps the fork's existing safeguards:
+
+- local embedding is still loaded lazily
+- remote embedding still short-circuits startup warmup
+- read-only Web UI paths still avoid forcing local model initialization
+- cache and timeout behavior stay unchanged
+
+Only the underlying runtime package changed:
+
+- from `@xenova/transformers`
+- to `@huggingface/transformers`
+
+The local model IDs remain the same Hugging Face identifiers such as:
+
+- `Xenova/nomic-embed-text-v1`
+- `Xenova/all-MiniLM-L6-v2`
+
+So user-facing config stays compatible even though the package changed.
+
+### 3. macOS-specific risk review
+
+A dedicated macOS review was done for this change before documenting and
+shipping it.
+
+Reviewed risk points:
+
+- **Embedding package portability**
+  The new package is the official successor and avoids the old install-script
+  failure mode that was especially painful in plugin installs. This reduces
+  startup risk on both Windows and macOS instead of favoring one platform.
+
+- **Build tooling portability**
+  The repo still uses the Node-based copy path in `scripts/build.mjs`, so this
+  change does not reintroduce shell-only commands like `cp -r` or `mkdir -p`.
+
+- **Path handling**
+  No Windows-only path logic was added for the embedding migration. The code
+  still relies on Node/Bun path handling and config expansion that remains
+  valid for macOS.
+
+- **Remote-embedding startup behavior**
+  `opencode --print-logs --log-level INFO stats` was re-verified with a remote
+  embedding config and still works without forcing local model startup.
+
+- **Local-embedding behavior**
+  A dedicated local smoke run using `Xenova/all-MiniLM-L6-v2` completed
+  successfully and returned the expected 384-dim vector, confirming on-demand
+  initialization still works after the package migration.
+
+Conclusion:
+
+- no new macOS-specific regression was introduced by this migration
+- the change improves cross-platform robustness rather than specializing for Windows
+
+### 4. Husky repair
+
+The local repository had a broken Husky runtime state:
+
+- `.husky/_/post-commit` existed
+- but `.husky/_/h` was missing
+- commits therefore emitted `.husky/_/h: No such file or directory`
+
+The fix for this pass was intentionally local-runtime only:
+
+- rerun the existing Husky install path through `bun install`
+- restore generated helper files under `.husky/_`
+- confirm `core.hooksPath` still points at `.husky/_`
+
+No repo-wide Husky hardening was added in this pass; the goal was to restore
+the current machine without changing hook policy.
+
+### 5. Validation
+
+Verified locally with:
+
+- `bun install`
+- `bun run build`
+- `bun run typecheck`
+- `bun test tests/plugin-loader-contract.test.ts`
+- `bun test tests/language-detector.test.ts tests/profile-write.test.ts tests/memory-scope.test.ts tests/openai-chat-completion-provider.test.ts`
+- `bun test tests/vector-backends/backend-factory.test.ts`
+- `opencode --print-logs --log-level INFO stats`
+- a temporary local-embedding smoke run using `Xenova/all-MiniLM-L6-v2`
+
+Results:
+
+- dependency migration and build succeeded
+- remote-embedding startup stayed non-blocking for `stats`
+- local embedding still initialized on demand and returned the expected vector size
+- Husky helper runtime files were restored successfully
+
+Known pre-existing issue observed during validation:
+
+- `tests/vector-search-backend-integration.test.ts` still hit a Windows temp-dir
+  `EBUSY` cleanup failure; this appears unrelated to the transformer migration
+  and was not changed in this pass
 
 ## 2026-04-08 — Add In-App Project Documentation, Local Web Assets, And User-Facing Setup Guides
 

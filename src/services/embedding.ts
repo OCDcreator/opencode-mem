@@ -134,7 +134,7 @@ export class EmbeddingService {
 
   private async getTransformers(): Promise<TransformersModule> {
     if (!this.transformersPromise) {
-      this.transformersPromise = import("@xenova/transformers")
+      this.transformersPromise = import("@huggingface/transformers")
         .then((module) => {
           const transformers = module as unknown as TransformersModule;
           transformers.env.allowLocalModels = true;

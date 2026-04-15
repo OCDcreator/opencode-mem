@@ -14,12 +14,13 @@ File: `src/services/embedding.ts`
 
 Important change:
 
-- `@xenova/transformers` is no longer imported at module top-level.
+- `@huggingface/transformers` is no longer imported at module top-level.
 - It is loaded dynamically only when local embedding is actually used.
 
 Why this matters:
 
-- The original loading path could crash plugin startup on Windows because `@xenova/transformers` pulls `sharp`.
+- The original loading path could crash plugin startup because the older `@xenova/transformers` / `sharp` chain was fragile in plugin install contexts.
+- This fork now uses `@huggingface/transformers`, which keeps the same lazy-loading model but is safer in `--ignore-scripts` style installs.
 - Remote embedding mode should not require `sharp` or local model loading at startup.
 
 Practical rule:

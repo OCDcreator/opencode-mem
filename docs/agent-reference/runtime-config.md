@@ -60,7 +60,7 @@ Put those keys in `~/.config/opencode/opencode-mem.jsonc` for the machine-wide d
 
 Use this when:
 
-- a local / Hugging Face-backed Xenova model is desired
+- a local Hugging Face model is desired
 - the machine can access the model download source
 
 Typical config:
@@ -72,7 +72,8 @@ Typical config:
 Notes:
 
 - Local mode may need internet access on first use to download model artifacts.
-- The default remote host used by `@xenova/transformers` is Hugging Face.
+- This fork now loads local models through `@huggingface/transformers`.
+- Existing Hugging Face model IDs such as `Xenova/nomic-embed-text-v1` still remain valid configuration values.
 - If local mode fails with "Unable to connect", this is usually a model download/network problem, not necessarily a plugin logic problem.
 
 ## 3. Current Runtime Architecture

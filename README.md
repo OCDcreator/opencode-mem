@@ -8,6 +8,39 @@
 
 A persistent memory system for AI coding agents that enables long-term context retention across sessions using local vector database technology.
 
+## Fork Status
+
+This repository is the actively maintained fork:
+
+- **Fork**: `OCDcreator/opencode-mem`
+- **Upstream**: `tickernelz/opencode-mem`
+- **Local package version in this fork**: `2.13.0-custom`
+
+The fork keeps upstream's core memory plugin behavior, but it is **not** a
+pure mirror. It prioritizes:
+
+- stable local plugin startup
+- Windows-first development **with macOS parity**
+- safer local-vs-remote embedding behavior
+- local wrapper iteration and Web UI usability improvements
+
+## What This Fork Changes
+
+Compared with upstream, this fork currently keeps several practical deltas:
+
+- **Embedding startup is safer**: local embedding stays lazy-loaded, and remote embedding does not force local model startup during read-only flows.
+- **Embedding runtime is more install-safe**: local embedding now uses `@huggingface/transformers`, which is more robust in plugin install contexts that ignore postinstall scripts.
+- **Build tooling stays cross-platform**: web/docs packaging uses a Node-based copy step instead of shell-only commands, so `bun run build` remains friendly to both Windows and macOS.
+- **OpenCode integration is hardened**: the plugin loader/export path and provider startup path are tuned for local OpenCode wrapper workflows used in this fork.
+- **Web UI is more user-facing**: the fork adds bilingual UI improvements, in-app docs, clearer memory stats, and explanatory tooltips.
+- **Header branding is fork-aware**: the Web UI explicitly links both the upstream repo and this fork.
+
+## Compatibility Notes
+
+- **Remote embedding mode** is still the safest startup path when you want the Web UI and stats endpoints to remain available even if local model download is unavailable.
+- **Local embedding mode** still accepts Hugging Face model IDs such as `Xenova/nomic-embed-text-v1` and `Xenova/all-MiniLM-L6-v2`; only the runtime package changed, not the model naming scheme.
+- This fork aims to keep Windows and macOS behavior aligned. Avoid reintroducing shell-only build commands or platform-specific path hacks.
+
 ## Visual Overview
 
 **Project Memory Timeline:**
@@ -141,6 +174,12 @@ Supported providers: `anthropic`, `openai`
 
 Full documentation available in this README.
 
+## Fork vs Upstream Links
+
+- **Fork repository**: https://github.com/OCDcreator/opencode-mem
+- **Upstream repository**: https://github.com/tickernelz/opencode-mem
+- **Upstream issues**: https://github.com/tickernelz/opencode-mem/issues
+
 ## Development & Contribution
 
 Build and test locally:
@@ -152,13 +191,22 @@ bun run typecheck
 bun run format
 ```
 
-This project is actively seeking contributions to become the definitive memory plugin for AI coding agents. Whether you are fixing bugs, adding features, improving documentation, or expanding embedding model support, your contributions are critical. The codebase is well-structured and ready for enhancement. If you hit a blocker or have improvement ideas, submit a pull request - we review and merge contributions quickly.
+For work that targets this fork specifically, prefer preserving:
+
+- cross-platform `bun run build`
+- local-wrapper / OpenCode loader compatibility
+- lazy local embedding startup
+- remote embedding not forcing local model initialization on read-only endpoints
+
+Contributions are welcome both upstream and in this fork, but please call out
+when a change depends on fork-only behavior.
 
 ## License & Links
 
 MIT License - see LICENSE file
 
 - **Repository**: https://github.com/tickernelz/opencode-mem
+- **Fork Repository**: https://github.com/OCDcreator/opencode-mem
 - **Issues**: https://github.com/tickernelz/opencode-mem/issues
 - **OpenCode Platform**: https://opencode.ai
 
