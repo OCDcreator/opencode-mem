@@ -12,7 +12,7 @@ import { userPromptManager } from "./services/user-prompt/user-prompt-manager.js
 import { extractNonSyntheticUserMessage } from "./services/user-message.js";
 import { startWebServer, WebServer } from "./services/web-server.js";
 
-import { isConfigured, CONFIG, initConfig } from "./config.js";
+import { isConfigured, CONFIG, initConfig, getConfigStartupErrors } from "./config.js";
 import { log } from "./services/logger.js";
 import type { MemoryType } from "./types/index.js";
 import { getLanguageName } from "./services/language-detector.js";
@@ -33,6 +33,7 @@ function shouldLogPluginEvent(eventType: string): boolean {
 export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
   const { directory } = ctx;
   initConfig(directory);
+  const configStartupErrors = getConfigStartupErrors();
   const tags = getTags(directory);
   let webServer: WebServer | null = null;
   const idleTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -119,7 +120,23 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
     });
   };
 
-  if (!isConfigured()) {
+  if (configStartupErrors.length > 0) {
+    const startupErrorMessage =
+      configStartupErrors[0] ?? "Unknown configuration error during startup";
+    log("Configuration startup errors detected", { errors: configStartupErrors });
+
+    if (ctx.client?.tui && CONFIG.showErrorToasts) {
+      ctx.client.tui
+        .showToast({
+          body: {
+            title: "Memory Explorer Error",
+            message: startupErrorMessage,
+            variant: "error",
+            duration: 8000,
+          },
+        })
+        .catch(() => {});
+    }
   }
 
   const GLOBAL_PLUGIN_WARMUP_KEY = Symbol.for("opencode-mem.plugin.warmedup");

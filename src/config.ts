@@ -10,6 +10,7 @@ const CONFIG_FILES = [
   join(CONFIG_DIR, "opencode-mem.jsonc"),
   join(CONFIG_DIR, "opencode-mem.json"),
 ];
+let _configStartupErrors: string[] = [];
 
 if (!existsSync(CONFIG_DIR)) {
   mkdirSync(CONFIG_DIR, { recursive: true });
@@ -450,6 +451,35 @@ function getEmbeddingDimensions(model: string): number {
 }
 
 function buildConfig(fileConfig: OpenCodeMemConfig) {
+  const configErrors: string[] = [];
+
+  const resolveSecretSetting = (
+    value: string | undefined,
+    fieldName: string
+  ): string | undefined => {
+    try {
+      return resolveSecretValue(value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      configErrors.push(`${fieldName}: ${message}`);
+      return undefined;
+    }
+  };
+
+  const embeddingApiKey = fileConfig.embeddingApiUrl
+    ? resolveSecretSetting(fileConfig.embeddingApiKey ?? process.env.OPENAI_API_KEY, "embeddingApiKey")
+    : undefined;
+
+  if (fileConfig.embeddingApiUrl && !embeddingApiKey) {
+    configErrors.push(
+      "embeddingApiKey: value is required when embeddingApiUrl is configured"
+    );
+  }
+
+  const memoryApiKey = resolveSecretSetting(fileConfig.memoryApiKey, "memoryApiKey");
+
+  _configStartupErrors = configErrors;
+
   return {
     storagePath: expandPath(fileConfig.storagePath ?? DEFAULTS.storagePath),
     userEmailOverride: fileConfig.userEmailOverride,
@@ -459,9 +489,7 @@ function buildConfig(fileConfig: OpenCodeMemConfig) {
       fileConfig.embeddingDimensions ??
       getEmbeddingDimensions(fileConfig.embeddingModel ?? DEFAULTS.embeddingModel),
     embeddingApiUrl: fileConfig.embeddingApiUrl,
-    embeddingApiKey: fileConfig.embeddingApiUrl
-      ? resolveSecretValue(fileConfig.embeddingApiKey ?? process.env.OPENAI_API_KEY)
-      : undefined,
+    embeddingApiKey,
     similarityThreshold: fileConfig.similarityThreshold ?? DEFAULTS.similarityThreshold,
     maxMemories: fileConfig.maxMemories ?? DEFAULTS.maxMemories,
     maxProfileItems: fileConfig.maxProfileItems ?? DEFAULTS.maxProfileItems,
@@ -479,7 +507,7 @@ function buildConfig(fileConfig: OpenCodeMemConfig) {
       | "anthropic",
     memoryModel: fileConfig.memoryModel,
     memoryApiUrl: fileConfig.memoryApiUrl,
-    memoryApiKey: resolveSecretValue(fileConfig.memoryApiKey),
+    memoryApiKey,
     memoryTemperature: fileConfig.memoryTemperature,
     memoryExtraParams: fileConfig.memoryExtraParams,
     opencodeProvider: fileConfig.opencodeProvider,
@@ -543,6 +571,10 @@ export function initConfig(directory: string): void {
   CONFIG = buildConfig(merged);
 }
 
+export function getConfigStartupErrors(): string[] {
+  return [..._configStartupErrors];
+}
+
 export function isConfigured(): boolean {
-  return true;
+  return _configStartupErrors.length === 0;
 }
