@@ -6,72 +6,71 @@
 
 ![OpenCode Memory Banner](.github/banner.png)
 
-A persistent memory system for AI coding agents that enables long-term context retention across sessions using local vector database technology.
+一个面向 AI 编码代理的持久记忆系统，基于本地向量数据库，让跨会话的长期上下文保留成为可能。
 
-## Fork Status
+## Fork 状态
 
-This repository is the actively maintained fork:
+这个仓库是当前持续维护的 fork：
 
-- **Fork**: `OCDcreator/opencode-mem`
-- **Upstream**: `tickernelz/opencode-mem`
-- **Local package version in this fork**: `2.13.0-custom`
+- **Fork**：`OCDcreator/opencode-mem`
+- **上游仓库**：`tickernelz/opencode-mem`
+- **本 fork 当前包版本**：`2.13.0-custom`
 
-The fork keeps upstream's core memory plugin behavior, but it is **not** a
-pure mirror. It prioritizes:
+这个 fork 保留了上游记忆插件的核心能力，但它**不是**纯镜像版本。当前维护重点是：
 
-- stable local plugin startup
-- Windows-first development **with macOS parity**
-- safer local-vs-remote embedding behavior
-- local wrapper iteration and Web UI usability improvements
+- 本地插件启动更稳定
+- Windows 优先开发，同时保持 **macOS 对等支持**
+- 本地 embedding 与远程 embedding 的切换更稳妥
+- 更适合本地 wrapper 调试迭代与 Web UI 使用体验优化
 
-## What This Fork Changes
+## 这个 Fork 做了哪些改动
 
-Compared with upstream, this fork currently keeps several practical deltas:
+和上游相比，这个 fork 目前保留了几类更偏实用性的差异化改动：
 
-- **Embedding startup is safer**: local embedding stays lazy-loaded, and remote embedding does not force local model startup during read-only flows.
-- **Embedding runtime is more install-safe**: local embedding now uses `@huggingface/transformers`, which is more robust in plugin install contexts that ignore postinstall scripts.
-- **Build tooling stays cross-platform**: web/docs packaging uses a Node-based copy step instead of shell-only commands, so `bun run build` remains friendly to both Windows and macOS.
-- **OpenCode integration is hardened**: the plugin loader/export path and provider startup path are tuned for local OpenCode wrapper workflows used in this fork.
-- **Web UI is more user-facing**: the fork adds bilingual UI improvements, in-app docs, clearer memory stats, and explanatory tooltips.
-- **Header branding is fork-aware**: the Web UI explicitly links both the upstream repo and this fork.
+- **Embedding 启动更安全**：本地 embedding 仍然按需懒加载，远程 embedding 不会在只读场景里强制启动本地模型。
+- **Embedding 运行时安装更稳**：本地 embedding 现在使用 `@huggingface/transformers`，在忽略 `postinstall` 脚本的插件安装环境里更稳健。
+- **构建链路保持跨平台**：Web / docs 打包使用 Node 复制步骤，而不是 shell 命令，因此 `bun run build` 对 Windows 和 macOS 都更友好。
+- **OpenCode 集成更稳固**：插件加载导出路径、provider 启动路径都针对这个 fork 的本地 OpenCode wrapper 工作流做了加固。
+- **Web UI 更面向终端用户**：增加了双语界面优化、内置文档、更清晰的记忆统计文案和解释型 tooltip。
+- **页头 branding 更清晰**：Web UI 会同时展示 upstream 和当前 fork 的仓库链接。
 
-## Compatibility Notes
+## 兼容性说明
 
-- **Remote embedding mode** is still the safest startup path when you want the Web UI and stats endpoints to remain available even if local model download is unavailable.
-- **Local embedding mode** still accepts Hugging Face model IDs such as `Xenova/nomic-embed-text-v1` and `Xenova/all-MiniLM-L6-v2`; only the runtime package changed, not the model naming scheme.
-- This fork aims to keep Windows and macOS behavior aligned. Avoid reintroducing shell-only build commands or platform-specific path hacks.
+- **远程 embedding 模式** 依然是最稳的启动路径：即使本地模型下载不可用，也能尽量保证 Web UI 和 `stats` 这类只读接口可用。
+- **本地 embedding 模式** 仍然支持 `Xenova/nomic-embed-text-v1`、`Xenova/all-MiniLM-L6-v2` 这类 Hugging Face 模型 ID；变化的只是运行时包，不是模型命名方式。
+- 这个 fork 的目标是尽量保持 Windows 与 macOS 行为一致，避免重新引入仅适配某个平台的 shell 构建命令或路径 hack。
 
-## Visual Overview
+## 可视化概览
 
-**Project Memory Timeline:**
+**项目记忆时间线：**
 
 ![Project Memory Timeline](.github/screenshot-project-memory.png)
 
-**User Profile Viewer:**
+**用户画像查看器：**
 
 ![User Profile Viewer](.github/screenshot-user-profile.png)
 
-## Core Features
+## 核心特性
 
-Local vector database with SQLite + USearch-first vector indexing and ExactScan fallback, persistent project memories, automatic user profile learning, unified memory-prompt timeline, full-featured web UI, intelligent prompt-based memory extraction, multi-provider AI support (OpenAI, Anthropic), 12+ local embedding models, smart deduplication, and built-in privacy protection.
+基于 SQLite 的本地向量数据库，优先使用 USearch 建索引并在失败时回退到 ExactScan；支持持久化项目记忆、自动用户画像学习、统一的记忆-提示词时间线、功能完整的 Web UI、基于提示词的智能记忆提取、多 AI provider 支持（OpenAI、Anthropic）、12+ 本地 embedding 模型、智能去重，以及内置隐私保护。
 
-## Prerequisites
+## 前置条件
 
-This plugin uses `USearch` for preferred in-memory vector indexing with automatic ExactScan fallback. No custom SQLite build or browser runtime shim is required.
+这个插件优先使用 `USearch` 做内存向量索引，并在不可用时自动回退到 ExactScan。不需要自定义 SQLite 构建，也不需要额外的浏览器运行时 shim。
 
-**Recommended runtime:**
+**推荐运行环境：**
 
 - Bun
-- Standard OpenCode plugin environment
+- 标准 OpenCode 插件环境
 
-**Notes:**
+**说明：**
 
-- If `USearch` is unavailable or fails at runtime, the plugin automatically falls back to exact vector scanning.
-- SQLite remains the source of truth; search indexes are rebuilt from SQLite data when needed.
+- 如果 `USearch` 不可用或运行失败，插件会自动回退到精确向量扫描。
+- SQLite 依然是唯一事实来源；搜索索引在需要时会根据 SQLite 中的数据重建。
 
-## Getting Started
+## 快速开始
 
-Add to your OpenCode configuration at `~/.config/opencode/opencode.json`:
+把下面内容加入你的 OpenCode 配置文件 `~/.config/opencode/opencode.json`：
 
 ```jsonc
 {
@@ -79,9 +78,9 @@ Add to your OpenCode configuration at `~/.config/opencode/opencode.json`:
 }
 ```
 
-The plugin downloads automatically on next startup.
+下次启动时插件会自动下载并加载。
 
-## Usage Examples
+## 使用示例
 
 ```typescript
 memory({ mode: "add", content: "Project uses microservices architecture" });
@@ -91,11 +90,11 @@ memory({ mode: "profile" });
 memory({ mode: "list", limit: 10 });
 ```
 
-Access the web interface at `http://127.0.0.1:4747` for visual memory browsing and management.
+访问 `http://127.0.0.1:4747` 打开 Web 界面，用可视化方式浏览和管理记忆。
 
-## Configuration Essentials
+## 核心配置
 
-Configure at `~/.config/opencode/opencode-mem.jsonc`:
+在 `~/.config/opencode/opencode-mem.jsonc` 中配置：
 
 ```jsonc
 {
@@ -136,26 +135,26 @@ Configure at `~/.config/opencode/opencode-mem.jsonc`:
 }
 ```
 
-### Memory Scope
+### 记忆作用域
 
-- `scope: "project"`: query only the current project. This is the default.
-- `scope: "all-projects"`: query `search` / `list` across all project shards.
-- `memory.defaultScope` sets the default query scope when no explicit scope is provided.
+- `scope: "project"`：只查询当前项目，这是默认值。
+- `scope: "all-projects"`：让 `search` / `list` 跨所有项目分片查询。
+- `memory.defaultScope`：当没有显式传入 `scope` 时，决定默认查询范围。
 
-### Auto-Capture AI Provider
+### 自动采集使用的 AI Provider
 
-**Recommended:** Use opencode's built-in providers (no separate API key needed):
+**推荐方式：** 直接使用 OpenCode 已配置好的 provider，不需要再单独配置 API Key：
 
 ```jsonc
 "opencodeProvider": "anthropic",
 "opencodeModel": "claude-haiku-4-5-20251001",
 ```
 
-This leverages your existing opencode authentication (OAuth or API key). Works with Claude Pro/Max plans via OAuth - no individual API keys required.
+这会直接复用你现有的 OpenCode 认证（OAuth 或 API Key）。如果你在 OpenCode 中使用 Claude Pro / Max 的 OAuth 登录，也不需要额外再填单独的 API Key。
 
-Supported providers: `anthropic`, `openai`
+支持的 provider：`anthropic`、`openai`
 
-**Fallback:** Manual API configuration (if not using opencodeProvider):
+**回退方案：** 如果你不使用 `opencodeProvider`，也可以手动配置 API：
 
 ```jsonc
 "memoryProvider": "openai-chat",
@@ -164,7 +163,7 @@ Supported providers: `anthropic`, `openai`
 "memoryApiKey": "sk-...",
 ```
 
-**API Key Formats:**
+**API Key 支持格式：**
 
 ```jsonc
 "memoryApiKey": "sk-..."
@@ -172,17 +171,17 @@ Supported providers: `anthropic`, `openai`
 "memoryApiKey": "env://OPENAI_API_KEY"
 ```
 
-Full documentation available in this README.
+更完整的说明请继续阅读本 README。
 
-## Fork vs Upstream Links
+## Fork 与上游链接
 
-- **Fork repository**: https://github.com/OCDcreator/opencode-mem
-- **Upstream repository**: https://github.com/tickernelz/opencode-mem
-- **Upstream issues**: https://github.com/tickernelz/opencode-mem/issues
+- **Fork 仓库**：https://github.com/OCDcreator/opencode-mem
+- **上游仓库**：https://github.com/tickernelz/opencode-mem
+- **上游 Issues**：https://github.com/tickernelz/opencode-mem/issues
 
-## Development & Contribution
+## 开发与贡献
 
-Build and test locally:
+本地构建与测试：
 
 ```bash
 bun install
@@ -191,23 +190,22 @@ bun run typecheck
 bun run format
 ```
 
-For work that targets this fork specifically, prefer preserving:
+如果你的改动是针对这个 fork 的，请优先保持以下约束不变：
 
-- cross-platform `bun run build`
-- local-wrapper / OpenCode loader compatibility
-- lazy local embedding startup
-- remote embedding not forcing local model initialization on read-only endpoints
+- 跨平台可用的 `bun run build`
+- local-wrapper / OpenCode loader 兼容性
+- 本地 embedding 懒加载启动
+- 远程 embedding 不在只读接口上强制触发本地模型初始化
 
-Contributions are welcome both upstream and in this fork, but please call out
-when a change depends on fork-only behavior.
+无论是给 upstream 还是给这个 fork 提交贡献都欢迎，但如果某个改动依赖 fork 专有行为，请在提交说明里明确写清楚。
 
-## License & Links
+## 许可证与相关链接
 
-MIT License - see LICENSE file
+MIT License，详见 `LICENSE` 文件。
 
-- **Repository**: https://github.com/tickernelz/opencode-mem
-- **Fork Repository**: https://github.com/OCDcreator/opencode-mem
-- **Issues**: https://github.com/tickernelz/opencode-mem/issues
-- **OpenCode Platform**: https://opencode.ai
+- **上游仓库**：https://github.com/tickernelz/opencode-mem
+- **Fork 仓库**：https://github.com/OCDcreator/opencode-mem
+- **Issues**：https://github.com/tickernelz/opencode-mem/issues
+- **OpenCode 平台**：https://opencode.ai
 
-Inspired by [opencode-supermemory](https://github.com/supermemoryai/opencode-supermemory)
+灵感来自 [opencode-supermemory](https://github.com/supermemoryai/opencode-supermemory)
