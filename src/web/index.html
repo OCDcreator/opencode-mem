@@ -63,7 +63,7 @@
           </div>
         </div>
         <div class="stats-bar">
-          <span id="stats-total">Total: 0</span>
+          <span id="stats-total" data-i18n-title="tooltip-stats-total">Total: 0</span>
           <span id="refresh-indicator" class="hidden"
             ><i data-lucide="rotate-cw" class="icon icon-spin"></i
           ></span>
@@ -71,11 +71,21 @@
       </header>
 
       <div class="scope-tabs">
-        <button id="tab-project" class="tab-btn active" data-i18n="tab-project">
+        <button
+          id="tab-project"
+          class="tab-btn active"
+          data-i18n="tab-project"
+          data-i18n-title="tooltip-tab-project"
+        >
           <i data-lucide="folder" class="icon"></i>
           PROJECT MEMORIES
         </button>
-        <button id="tab-profile" class="tab-btn" data-i18n="tab-profile">
+        <button
+          id="tab-profile"
+          class="tab-btn"
+          data-i18n="tab-profile"
+          data-i18n-title="tooltip-tab-profile"
+        >
           <i data-lucide="user" class="icon"></i>
           USER PROFILE
         </button>
@@ -84,7 +94,7 @@
       <div class="controls">
         <div class="filter-group">
           <label data-i18n="label-tag">Tag:</label>
-          <select id="tag-filter">
+          <select id="tag-filter" data-i18n-title="tooltip-tag-filter">
             <option value="" data-i18n="opt-all-tags">All Tags</option>
           </select>
         </div>
@@ -94,30 +104,53 @@
             type="text"
             id="search-input"
             data-i18n-placeholder="placeholder-search"
+            data-i18n-title="tooltip-search-input"
             placeholder="Search memories..."
           />
-          <button id="search-btn"><i data-lucide="search" class="icon"></i></button>
-          <button id="clear-search-btn" class="hidden"><i data-lucide="x" class="icon"></i></button>
+          <button id="search-btn" data-i18n-title="tooltip-search-btn">
+            <i data-lucide="search" class="icon"></i>
+          </button>
+          <button id="clear-search-btn" class="hidden" data-i18n-title="tooltip-clear-search-btn">
+            <i data-lucide="x" class="icon"></i>
+          </button>
         </div>
 
         <div class="maintenance-actions">
-          <button id="cleanup-btn" class="btn-maintenance" data-i18n="btn-cleanup">
+          <button
+            id="cleanup-btn"
+            class="btn-maintenance"
+            data-i18n="btn-cleanup"
+            data-i18n-title="tooltip-cleanup"
+          >
             <i data-lucide="trash" class="icon"></i> Cleanup
           </button>
-          <button id="deduplicate-btn" class="btn-maintenance" data-i18n="btn-deduplicate">
+          <button
+            id="deduplicate-btn"
+            class="btn-maintenance"
+            data-i18n="btn-deduplicate"
+            data-i18n-title="tooltip-deduplicate"
+          >
             <i data-lucide="refresh-cw" class="icon"></i> Deduplicate
           </button>
         </div>
 
         <div class="bulk-actions hidden" id="bulk-actions">
           <span id="selected-count" data-i18n="text-selected">0 selected</span>
-          <button id="select-all-btn" data-i18n="btn-select-all">
+          <button id="select-all-btn" data-i18n="btn-select-all" data-i18n-title="tooltip-select-all">
             <i data-lucide="check-square" class="icon"></i> Select Page
           </button>
-          <button id="bulk-delete-btn" data-i18n="btn-delete-selected">
+          <button
+            id="bulk-delete-btn"
+            data-i18n="btn-delete-selected"
+            data-i18n-title="tooltip-bulk-delete"
+          >
             <i data-lucide="trash-2" class="icon"></i> Delete Selected
           </button>
-          <button id="deselect-all-btn" data-i18n="btn-deselect-all">
+          <button
+            id="deselect-all-btn"
+            data-i18n="btn-deselect-all"
+            data-i18n-title="tooltip-deselect-all"
+          >
             <i data-lucide="x" class="icon"></i> Deselect All
           </button>
         </div>
@@ -155,7 +188,13 @@
 
       <div class="memories-section" id="project-section">
         <div class="section-header">
-          <h2 id="section-title" data-i18n="section-project">└─ PROJECT MEMORIES (0) ──</h2>
+          <h2
+            id="section-title"
+            data-i18n="section-project"
+            data-i18n-title="tooltip-section-project"
+          >
+            └─ PROJECT MEMORIES (0) ──
+          </h2>
           <div class="pagination" id="pagination-top">
             <button id="prev-page-top" disabled>
               <i data-lucide="chevron-left" class="icon"></i>
@@ -185,7 +224,12 @@
       <div class="profile-section hidden" id="profile-section">
         <div class="section-header">
           <h2 data-i18n="section-profile">└─ USER PROFILE ──</h2>
-          <button id="refresh-profile-btn" class="btn-secondary" data-i18n="btn-refresh">
+          <button
+            id="refresh-profile-btn"
+            class="btn-secondary"
+            data-i18n="btn-refresh"
+            data-i18n-title="tooltip-refresh-profile"
+          >
             <i data-lucide="refresh-cw" class="icon"></i> Refresh
           </button>
         </div>

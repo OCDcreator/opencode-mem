@@ -438,7 +438,9 @@ function updateSectionTitle() {
   const title = state.isSearching
     ? t("section-search", { count: state.totalItems })
     : t("section-project", { count: state.totalItems });
-  document.getElementById("section-title").textContent = title;
+  const sectionTitle = document.getElementById("section-title");
+  sectionTitle.textContent = title;
+  sectionTitle.title = state.isSearching ? t("tooltip-section-search") : t("tooltip-section-project");
 }
 
 async function loadStats() {
