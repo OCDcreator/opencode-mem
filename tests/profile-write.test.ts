@@ -30,7 +30,9 @@ describe("UserProfileManager – explicit preference writes", () => {
 
   afterEach(() => {
     connectionManager.closeAll();
-    rmSync(tmpDir, { recursive: true, force: true });
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
   });
 
   it("creates a profile with an explicit preference when none exists", async () => {
