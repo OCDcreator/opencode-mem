@@ -1,5 +1,15 @@
 # Upstream Sync Log
 
+## Quick Checklist
+
+- fetch latest history: `git fetch --all --prune`
+- read the newest entry in this file and note `Reviewed through upstream commit`
+- compare only the range after that cursor unless a full re-audit was explicitly requested
+- use `git log`, `git cherry`, and targeted diffs to separate merged, manually absorbed, already covered, and still-pending upstream commits
+- merge or manually absorb only the commits that still add value to the fork
+- run the smallest verification set that matches the affected files
+- append a new top entry here with the new review window, decisions, and advanced cursor
+
 This file is the running ledger for upstream review work against:
 
 - upstream repository: `tickernelz/opencode-mem`
