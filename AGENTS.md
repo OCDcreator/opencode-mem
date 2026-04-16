@@ -3,7 +3,7 @@
 This document is the compact maintenance entry point for the `OCDcreator/opencode-mem` fork.
 It is intended for future coding agents and maintainers working on this repository.
 
-Last updated: 2026-04-08
+Last updated: 2026-04-16
 
 ## 0. Read This First
 
@@ -21,6 +21,7 @@ Rules of thumb:
 - `bun run format:check` has pre-existing Prettier drift; treat it as advisory unless you intentionally reformatted.
 - For upstream-sync work, start from the latest reviewed upstream commit recorded in `docs/agent-reference/upstream-sync-log.md` unless a full historical audit is explicitly requested.
 - After each upstream review pass, append a new entry to `docs/agent-reference/upstream-sync-log.md` so the next review can start from that cursor instead of the original fork point.
+- Current recorded upstream-sync cursor as of this update: `40508eb` (`2026-04-15`); verify the log before relying on this if more sync work has happened.
 
 ## 1. Fork Identity
 
@@ -34,7 +35,7 @@ This fork is not a pure mirror — it carries compatibility fixes (many original
 ## 2. Environment
 
 - Recommended runtime from `README.md`: Bun plus the standard OpenCode plugin environment.
-- `package.json` does not currently pin an `engines` version. Current toolchain assumptions track Bun 1.3-era types via `@types/bun` `^1.3.8`, TypeScript `^5.7.3`, and OpenCode plugin/sdk `^1.3.0`.
+- `package.json` does not currently pin an `engines` version. Current toolchain assumptions track Bun 1.3-era types via `@types/bun` `^1.3.8`, TypeScript `^5.7.3`, OpenCode plugin/sdk `^1.3.0`, and `@huggingface/transformers` `^4.0.1`.
 - `bun run build` compiles with Bun tooling and then runs `node scripts/build.mjs`, so keep both Bun and a Node-compatible runtime available.
 - Loader verification and Web UI checks assume a working OpenCode CLI/Desktop install.
 
@@ -71,30 +72,32 @@ This fork is not a pure mirror — it carries compatibility fixes (many original
 - `src/services/secret-resolver.ts` and `src/services/jsonc.ts`: config parsing and secret indirection helpers
 - `src/services/language-detector.ts` and `src/services/logger.ts`: language heuristics and local logging
 - `src/services/web-server.ts` and `src/services/web-server-worker.ts`: Bun web server, request routing, and static serving
-- `src/services/ai/`: provider loading, OpenCode state, config discovery, session management, validators, and structured-output helpers
+- `src/services/ai/`: provider loading, OpenCode state, provider adapters, config discovery, session/tools plumbing, validators, and structured-output helpers
 - `src/services/sqlite/`: SQLite bootstrap, shard management, and search plumbing
 - `src/services/vector-backends/`: USearch / ExactScan backend selection and fallbacks
 - `src/services/user-profile/`: user profile storage, context building, and helper utilities
 - `src/web/` and `src/web/vendor/`: static Web UI assets copied into `dist/web/` during build
 - `tests/`: Bun regression tests for loader, provider/config parsing, privacy, project scope, tags, user messages, vector backends, and Windows paths
 - `scripts/build.mjs`: platform-neutral copy step used by `bun run build`
+- `scripts/backfill-historical-prompts.ts`: maintenance script for historical prompt backfill work
 - `docs/` and `docs/en/`: bilingual user docs copied into the built Web UI
 
 Before assuming a concern is unimplemented, scan adjacent files in `src/services/`; several behaviors live in focused one-file modules instead of large index barrels.
 
 ## 5. Hard Invariants
 
-- Preserve the `PluginModule` export shape in `src/plugin.ts`; do not revert to a bare default export.
+- Preserve the `PluginModule` export shape in `src/plugin.ts`; do not revert to a bare default export, and keep the exported `id` aligned with `package.json` package name.
 - Preserve both built entrypoints: package exports resolve to `dist/plugin.js`, while the local wrapper workflow on this machine typically points at `dist/index.js`.
 - Do not `await` embedding or memory warmup during plugin init or read-only endpoints such as stats, tags, or timeline handlers.
-- If `embeddingApiUrl` and `embeddingApiKey` are configured in `~/.config/opencode/opencode-mem.jsonc` or `<project>/.opencode/opencode-mem.jsonc`, startup should not require local `@xenova/transformers` initialization.
+- If `embeddingApiUrl` and `embeddingApiKey` are configured in `~/.config/opencode/opencode-mem.jsonc` or `<project>/.opencode/opencode-mem.jsonc`, startup should not require local `@huggingface/transformers` initialization.
+- Legacy model IDs such as `Xenova/nomic-embed-text-v1` may remain valid config values, but do not reintroduce the old `@xenova/transformers` dependency path.
 - Keep provider-state deduplication limited to concurrent startup work unless you have proof that later refreshes are unnecessary.
 - Preserve both `Upstream` and `My Fork` repository links in the Web UI header unless the user explicitly requests a redesign.
 
 ## 6. Operational Guidance
 
 - Rebuild `dist/` with `bun run build`; do not hand-edit built output.
-- Machine-specific local plugin workflow lives in `docs/agent-reference/local-opencode-operations.md`; do not duplicate those details here.
+- Machine-specific local plugin workflow lives in `docs/agent-reference/local-opencode-operations.md`; treat it as higher priority than general npm-plugin guidance in `README.md`, but do not duplicate launcher details here.
 - Prefer platform-neutral filesystem logic in build tooling; do not reintroduce Unix-only copy commands unless they are verified Windows-safe.
 - `bun install` triggers `prepare`, which installs Husky hooks.
 - Keep config secrets referenced via `env://...` or `file://...` when possible instead of committing plaintext credentials.
@@ -113,6 +116,8 @@ Before assuming a concern is unimplemented, scan adjacent files in `src/services
 | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Loader / export / build output | `bun run build` → `bun test tests/plugin-loader-contract.test.ts` → `opencode --print-logs --log-level INFO stats`                                                                                                                            |
 | Provider / config parsing      | `bun run build` → smallest subset of `tests/{opencode-provider,config-resolution,config,ai-provider-config,anthropic-provider}.test.ts` → `stats`                                                                                             |
+| AI provider adapters / tools   | Smallest subset of `tests/{openai-chat-completion-provider,anthropic-provider,ai-provider-config,profile-tool-runtime,tool-scope}.test.ts`                                                                                                    |
+| User profile / memory scope    | Smallest subset of `tests/{profile-write,memory-scope,project-scope}.test.ts`                                                                                                                                                                 |
 | Windows path / platform-compat | `bun run typecheck` → `bun test tests/windows-path.test.ts` → `bun run build`                                                                                                                                                                 |
 | Message / privacy / tagging    | Smallest subset of `tests/{user-message,privacy,tags,project-scope,language-detector}.test.ts`                                                                                                                                                |
 | Vector backend / embedding     | `bun test tests/vector-search-backend-integration.test.ts` + smallest relevant `tests/vector-backends/*.test.ts`. If embedding code changed, also verify a remote embedding returns a vector and separately check first-run local model init. |
