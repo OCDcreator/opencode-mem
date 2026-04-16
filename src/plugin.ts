@@ -1,7 +1,18 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import type { Plugin, PluginInput, PluginModule } from "@opencode-ai/plugin";
 
-export const id = "opencode-mem";
+function readPackageName(): string {
+  const packageJson = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf-8")
+  ) as { name?: unknown };
+
+  return typeof packageJson.name === "string" && packageJson.name.trim()
+    ? packageJson.name.trim()
+    : "opencode-mem";
+}
+
+export const id = readPackageName();
 
 function formatStartupErrorMessage(error: unknown): string {
   const rawMessage = error instanceof Error ? error.message : String(error);

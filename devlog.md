@@ -3,6 +3,84 @@
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
 > 当前最新更新：2026-04-16
 
+## 2026-04-16 — Add Upstream Sync Ledger, Merge `.sisyphus` Ignore, And Derive Plugin Id From Package Name
+
+### Changed files
+
+| File                                        | Change                                                                                       |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `devlog.md`                                 | Record the new upstream-sync workflow and the current sync pass                              |
+| `AGENTS.md`                                 | Instruct future agents to use an upstream review cursor instead of restarting from fork base |
+| `docs/agent-reference/upstream-sync-log.md` | Add a persistent upstream review ledger with reviewed-through commit tracking                |
+| `.gitignore`                                | Merge upstream ignore rule for `.sisyphus`                                                   |
+| `src/plugin.ts`                             | Derive exported plugin `id` from `package.json` with a safe fallback                         |
+| `tests/plugin-loader-contract.test.ts`      | Assert plugin `id` is non-empty and matches package name                                     |
+
+### 1. Why add an upstream sync ledger
+
+The fork has already diverged enough that a fresh upstream review from the
+original fork point wastes time and creates noise.
+
+What matters operationally is not only which upstream commits exist, but also:
+
+- which ones were already cherry-picked
+- which ones were manually absorbed because the fork had local changes
+- which ones were already covered by later fork-specific work
+
+So this pass adds a lightweight upstream-sync ledger that future maintainers can
+use as a cursor.
+
+### 2. New maintenance rule
+
+Future upstream reviews should now:
+
+- start from the latest `Reviewed through upstream commit` recorded in
+  `docs/agent-reference/upstream-sync-log.md`
+- only fall back to a full historical audit when explicitly requested
+- append a new top entry after each review pass
+
+This keeps future comparisons focused on new upstream work instead of repeating
+the full divergence analysis from the fork base every time.
+
+### 3. Current sync pass result
+
+The current pass reviewed upstream through:
+
+- `40508eb` — `fix(embedding): migrate from @xenova/transformers to @huggingface/transformers (#90)`
+
+Decisions from this pass:
+
+- merged upstream `4c25113` to ignore `.sisyphus`
+- manually absorbed upstream plugin-id derivation instead of cherry-picking it directly
+- recorded previously covered upstream fixes so later sync passes can skip re-deriving that same conclusion
+
+### 4. Plugin loader alignment
+
+This pass also tightened one loader-contract detail that was still worth
+absorbing from upstream:
+
+- `src/plugin.ts` no longer hardcodes the exported plugin `id`
+- it now derives `id` from `package.json`
+- the loader contract test now checks that the exported `id` is non-empty and
+  matches the package name
+
+This keeps the fork aligned with upstream intent while preserving the fork's
+extra startup-failure handling in `src/plugin.ts`.
+
+### 5. Validation
+
+Verified locally with:
+
+- `bun run build`
+- `bun test tests/plugin-loader-contract.test.ts`
+- `opencode --print-logs --log-level INFO stats`
+
+Results:
+
+- build passed
+- loader contract test passed
+- local wrapper stats command still loaded successfully
+
 ## 2026-04-16 — Migrate Local Embedding Runtime To `@huggingface/transformers`, Recheck macOS Risk, And Repair Local Husky Runtime
 
 ### Changed files

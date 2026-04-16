@@ -12,12 +12,15 @@ Open only the subdocument relevant to your change:
 - `docs/agent-reference/fork-deltas.md` — fork behavior, invariants, operational caveats
 - `docs/agent-reference/runtime-config.md` — config, embedding modes, runtime architecture, model rules
 - `docs/agent-reference/local-opencode-operations.md` — **machine-specific**: local wrapper setup, loader debugging, verification workflow (launcher paths live here, not in this file)
+- `docs/agent-reference/upstream-sync-log.md` — upstream review cursor and merge/manual-absorb history
 
 Rules of thumb:
 
 - Run the smallest verification set that matches your change (see §8), not every workflow.
 - `bun test` works without a `package.json` `"test"` script — Bun auto-discovers `tests/**/*.test.ts`.
 - `bun run format:check` has pre-existing Prettier drift; treat it as advisory unless you intentionally reformatted.
+- For upstream-sync work, start from the latest reviewed upstream commit recorded in `docs/agent-reference/upstream-sync-log.md` unless a full historical audit is explicitly requested.
+- After each upstream review pass, append a new entry to `docs/agent-reference/upstream-sync-log.md` so the next review can start from that cursor instead of the original fork point.
 
 ## 1. Fork Identity
 
