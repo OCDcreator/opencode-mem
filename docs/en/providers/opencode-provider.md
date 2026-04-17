@@ -52,8 +52,8 @@ Add something like:
 
 ```jsonc
 {
-  "opencodeProvider": "zhipuai-coding-plan",
-  "opencodeModel": "glm-4.5",
+  "opencodeProvider": "zhipu-coding-plan",
+  "opencodeModel": "glm-4.7",
 }
 ```
 

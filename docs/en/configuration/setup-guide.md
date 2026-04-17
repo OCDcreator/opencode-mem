@@ -27,13 +27,13 @@ Use a minimal working setup like this:
 
   "autoCaptureEnabled": true,
 
-  "opencodeProvider": "zhipuai-coding-plan",
-  "opencodeModel": "glm-4.5",
+  "opencodeProvider": "zhipu-coding-plan",
+  "opencodeModel": "glm-4.7",
 
   "embeddingModel": "text-embedding-v4",
   "embeddingDimensions": 1024,
   "embeddingApiUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "embeddingApiKey": "env://DASHSCOPE_API_KEY",
+  "embeddingApiKey": "env://ALIBABA_API_KEY",
 }
 ```
 
@@ -60,8 +60,8 @@ Or combine it with the rest of your setup:
 
   "autoCaptureEnabled": true,
 
-  "opencodeProvider": "zhipuai-coding-plan",
-  "opencodeModel": "glm-4.5",
+  "opencodeProvider": "zhipu-coding-plan",
+  "opencodeModel": "glm-4.7",
 
   "embeddingModel": "Xenova/nomic-embed-text-v1",
 }

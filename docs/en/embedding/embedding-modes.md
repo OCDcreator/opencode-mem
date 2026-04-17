@@ -81,7 +81,7 @@ In this mode:
   "embeddingModel": "text-embedding-v4",
   "embeddingDimensions": 1024,
   "embeddingApiUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "embeddingApiKey": "env://DASHSCOPE_API_KEY",
+  "embeddingApiKey": "env://ALIBABA_API_KEY",
 }
 ```
 

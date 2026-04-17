@@ -84,7 +84,7 @@ Important change:
 
 Why this matters:
 
-- This is required for the current OpenCode setup using `zhipuai-coding-plan`.
+- This is required for the current OpenCode setup using `zhipu-coding-plan`.
 - It also avoids startup failure caused by `@vercel/oidc` / `ai` dependency behavior in this environment.
 
 Practical rule:

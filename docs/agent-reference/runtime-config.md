@@ -7,12 +7,12 @@ This document is the current runtime reference for configuration, embedding mode
 The current local environment is configured to use:
 
 - Auto-capture / user profile via OpenCode provider:
-  - `opencodeProvider = "zhipuai-coding-plan"`
-  - `opencodeModel = "glm-4.5"`
+  - `opencodeProvider = "zhipu-coding-plan"`
+  - `opencodeModel = "glm-4.7"`
 - Embedding via DashScope OpenAI-compatible endpoint:
   - `embeddingModel = "text-embedding-v4"`
   - `embeddingApiUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1"`
-  - `embeddingApiKey = "env://DASHSCOPE_API_KEY"`
+  - `embeddingApiKey = "env://ALIBABA_API_KEY"`
   - `embeddingDimensions = 1024`
 
 Important:
@@ -51,7 +51,7 @@ Required config:
 "embeddingModel": "text-embedding-v4",
 "embeddingDimensions": 1024,
 "embeddingApiUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-"embeddingApiKey": "env://DASHSCOPE_API_KEY"
+"embeddingApiKey": "env://ALIBABA_API_KEY"
 ```
 
 Put those keys in `~/.config/opencode/opencode-mem.jsonc` for the machine-wide default or in `<project>/.opencode/opencode-mem.jsonc` for a project override.
@@ -172,6 +172,6 @@ Reason:
 Current active setup:
 
 ```jsonc
-"opencodeProvider": "zhipuai-coding-plan",
-"opencodeModel": "glm-4.5"
+"opencodeProvider": "zhipu-coding-plan",
+"opencodeModel": "glm-4.7"
 ```
