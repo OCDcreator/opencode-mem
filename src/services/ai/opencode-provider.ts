@@ -143,7 +143,13 @@ function loadOpencodeConfig(statePath?: string): OpencodeConfigFile {
     });
     const raw = readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(stripJsoncComments(raw)) as OpencodeConfigFile;
-    return resolveConfigValue(parsed, dirname(configPath)) as OpencodeConfigFile;
+    return {
+      ...parsed,
+      provider: resolveConfigValue(parsed.provider ?? {}, dirname(configPath)) as Record<
+        string,
+        OpencodeProviderConfig
+      >,
+    };
   } catch (error) {
     throw new Error(`Failed to read opencode config at ${configPath}: ${String(error)}`);
   }
