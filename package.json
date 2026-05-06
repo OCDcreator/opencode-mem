@@ -17,7 +17,9 @@
   },
   "scripts": {
     "build": "bunx tsc && node scripts/build.mjs",
+    "check:local-plugin": "node scripts/install-local-plugin-wrapper.mjs --check",
     "dev": "tsc --watch",
+    "install:local-plugin": "node scripts/install-local-plugin-wrapper.mjs",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,js,css,html}\"",
     "format:check": "prettier --check \"src/**/*.{ts,js,css,html}\"",

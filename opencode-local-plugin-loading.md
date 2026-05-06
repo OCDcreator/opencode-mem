@@ -1,7 +1,8 @@
 # OpenCode Local Plugin Loading Playbook
 
 This note records the exact local loading path that was verified on this
-machine against the real OpenCode source, not guessed from memory.
+machine against the real OpenCode source, Desktop logs, and current OpenCode
+plugin docs, not guessed from memory.
 
 It is intended for future maintainers and coding agents who need to answer one
 question quickly:
@@ -21,15 +22,21 @@ Source-of-truth OpenCode repo on this machine:
 
 - `/Volumes/SDD2T/obsidian-vault-write/open-source-project/opencode`
 
-Key facts confirmed from that source:
+Current OpenCode docs:
+
+- `https://opencode.ai/docs/zh-cn/plugins/`
+
+Key facts confirmed from those sources:
 
 1. Local plugins are auto-loaded from:
    - `~/.config/opencode/plugins/`
    - `.opencode/plugins/`
 2. OpenCode scans `{plugin,plugins}/*.{ts,js}` in those directories.
-3. Path plugins must export `id`.
-4. Server plugins must default export an object with `server()`.
-5. Local plugins and npm plugins can both load, so duplicate configuration can
+3. The documented local plugin examples use ESM exports such as `export const MyPlugin = ...`.
+4. Local plugins that need package metadata or dependencies should use a `package.json` in the config/plugin package boundary.
+5. Path plugins must export `id` in the loader contract used by this fork.
+6. Server plugins must default export an object with `server()` in the loader contract used by this fork.
+7. Local plugins and npm plugins can both load, so duplicate configuration can
    load the wrong copy.
 
 What this means in practice:
@@ -63,16 +70,33 @@ Reason:
 
 The wrapper must satisfy the current OpenCode path-plugin contract.
 
+Also keep this package marker next to the wrapper:
+
+```json
+{
+  "type": "module"
+}
+```
+
+Path:
+
+- `~/.config/opencode/plugins/package.json`
+
 Canonical wrapper pattern:
 
 ```js
 import { pathToFileURL } from "node:url";
 
+const id = "opencode-mem";
 const entryUrl = pathToFileURL("/absolute/path/to/opencode-mem/dist/index.js").href;
-const { OpenCodeMemPlugin } = await import(entryUrl);
 
-export const id = "opencode-mem";
+async function OpenCodeMemPlugin(...args) {
+  const mod = await import(entryUrl);
+  return mod.OpenCodeMemPlugin(...args);
+}
 
+export { id, OpenCodeMemPlugin };
+export const server = OpenCodeMemPlugin;
 export default {
   id,
   server: OpenCodeMemPlugin,
@@ -82,21 +106,65 @@ export default {
 Notes:
 
 - `id` is required for path plugins.
-- The default export must be an object, not a bare plugin function.
-- The object must expose `server`, because this is a server plugin.
+- `OpenCodeMemPlugin` is exported for newer plugin discovery paths that read named function exports.
+- The default export supports the current server-plugin contract, while the top-level `server` and `OpenCodeMemPlugin` exports keep discovery paths explicit.
+- Keep `opencode-mem.js` explicitly ESM by writing `~/.config/opencode/plugins/package.json` with `{ "type": "module" }`. Otherwise Desktop can parse the wrapper under the wrong module mode and fail before the plugin starts.
+- Use `npm run install:local-plugin` to rewrite the machine-local wrapper/package marker from this repo and `npm run check:local-plugin` to verify them. The check also scans built service runtime files for CommonJS `require()` calls, because the wrapper can be correct while the imported ESM build still fails.
+
+### ESM runtime compatibility
+
+If Desktop logs still show:
+
+```text
+error=require is not defined in ES module scope
+```
+
+after the wrapper has been made ESM-compatible, the failure is probably no
+longer in `~/.config/opencode/plugins/opencode-mem.js`. Check the imported build
+instead:
+
+```powershell
+rg -n "\brequire\s*\(" dist/services src/services
+```
+
+On 2026-05-06, the wrapper loaded correctly but `dist/services/sqlite/sqlite-bootstrap.js`
+still contained `require("bun:sqlite")`, and `dist/services/sqlite/shard-manager.js`
+still contained `require("node:fs")`. OpenCode Desktop treated the repo build as
+ESM because this package has `"type": "module"`, so those CommonJS calls stopped
+the plugin before the Web UI server could bind `127.0.0.1:4747`.
+
+After removing bare `require()`, Desktop exposed the next runtime boundary:
+
+```text
+Only URLs with a scheme in: file, data, node, and electron are supported by the default ESM loader. Received protocol 'bun:'
+```
+
+That means static `import { Database } from "bun:sqlite"` is also not Desktop-safe.
+The durable bootstrap must choose the SQLite implementation at runtime:
+
+- Bun CLI path: `bun:sqlite`
+- Desktop Electron/Node path: `node:sqlite`
+
+`npm run check:local-plugin` includes a Node in-memory SQLite smoke test so this
+does not regress silently.
 
 ### macOS example
 
 ```js
 import { pathToFileURL } from "node:url";
 
+const id = "opencode-mem";
 const entryUrl = pathToFileURL(
   "/Volumes/SDD2T/obsidian-vault-write/custom-project/opencode-mem/dist/index.js"
 ).href;
-const { OpenCodeMemPlugin } = await import(entryUrl);
 
-export const id = "opencode-mem";
+async function OpenCodeMemPlugin(...args) {
+  const mod = await import(entryUrl);
+  return mod.OpenCodeMemPlugin(...args);
+}
 
+export { id, OpenCodeMemPlugin };
+export const server = OpenCodeMemPlugin;
 export default {
   id,
   server: OpenCodeMemPlugin,
@@ -108,13 +176,18 @@ export default {
 ```js
 import { pathToFileURL } from "node:url";
 
+const id = "opencode-mem";
 const entryUrl = pathToFileURL(
   "C:/Users/lt/Desktop/Write/custom-project/opencode-mem/dist/index.js"
 ).href;
-const { OpenCodeMemPlugin } = await import(entryUrl);
 
-export const id = "opencode-mem";
+async function OpenCodeMemPlugin(...args) {
+  const mod = await import(entryUrl);
+  return mod.OpenCodeMemPlugin(...args);
+}
 
+export { id, OpenCodeMemPlugin };
+export const server = OpenCodeMemPlugin;
 export default {
   id,
   server: OpenCodeMemPlugin,
@@ -245,10 +318,12 @@ If the plugin already works on Windows, do not start by rewriting runtime logic.
 Debug in this order:
 
 1. Check which plugin path OpenCode is actually loading.
-2. Check whether the local wrapper exports `id` and default `{ id, server }`.
-3. Check that `opencode-mem` is not duplicated in the npm `"plugin"` array.
-4. Check whether the verification command is long-lived enough to keep `4747` alive.
-5. Only then consider runtime/plugin source changes.
+2. Check whether the local wrapper is ESM-compatible and exports `id`, `OpenCodeMemPlugin`, top-level `server`, and default `{ id, server }`.
+3. Check whether `~/.config/opencode/plugins/package.json` exists and contains `{ "type": "module" }`.
+4. Check that `opencode-mem` is not duplicated in the npm `"plugin"` array.
+5. Check whether the wrapper-loaded build still contains runtime bare `require()` calls or static `bun:` imports under `src/services` or `dist/services`.
+6. Check whether the verification command is long-lived enough to keep `4747` alive.
+7. Only then consider broader runtime/plugin source changes.
 
 That order preserves cross-platform behavior and avoids unnecessary churn in the
 fork.

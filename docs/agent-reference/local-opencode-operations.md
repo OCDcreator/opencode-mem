@@ -16,6 +16,7 @@ Current preferred local setup:
 
 - OpenCode config file: `~/.config/opencode/opencode.json`
 - Local plugin wrapper: `~/.config/opencode/plugins/opencode-mem.js`
+- Local plugin package marker: `~/.config/opencode/plugins/package.json` with `{ "type": "module" }`
 - Wrapper target: this working copy's built file, typically:
   - Windows example: `C:/Users/lt/Desktop/Write/custom-project/opencode-mem/dist/index.js`
   - macOS example: `/Users/<you>/Desktop/Write/custom-project/opencode-mem/dist/index.js`
@@ -30,11 +31,16 @@ Required wrapper shape:
 ```js
 import { pathToFileURL } from "node:url";
 
+const id = "opencode-mem";
 const entryUrl = pathToFileURL("/absolute/path/to/opencode-mem/dist/index.js").href;
-const { OpenCodeMemPlugin } = await import(entryUrl);
 
-export const id = "opencode-mem";
+async function OpenCodeMemPlugin(...args) {
+  const mod = await import(entryUrl);
+  return mod.OpenCodeMemPlugin(...args);
+}
 
+export { id, OpenCodeMemPlugin };
+export const server = OpenCodeMemPlugin;
 export default {
   id,
   server: OpenCodeMemPlugin,
@@ -44,13 +50,17 @@ export default {
 Notes:
 
 - For Windows, prefer forward slashes inside the absolute path string, for example `C:/Users/.../dist/index.js`.
-- Do not default export a bare function from the wrapper.
-- Do not omit `id`, or OpenCode 1.3 path-plugin loading will fail.
+- Keep `~/.config/opencode/plugins/package.json` present with `{ "type": "module" }`. OpenCode Desktop imports local `*.js` wrappers with Node ESM semantics, and without an explicit package marker the same wrapper can be parsed under the wrong module mode.
+- The wrapper may still use dynamic `import(entryUrl)` inside the async plugin function so the repo's ESM `dist/index.js` remains unchanged.
+- Do not omit `id`, `OpenCodeMemPlugin`, top-level `server`, or the default `{ id, server }` object.
+- Run `npm run install:local-plugin` to rewrite the machine-local wrapper and package marker from this repo, and `npm run check:local-plugin` to verify they still match the expected ESM shape.
 
 Why this matters:
 
 - npm plugin mode can cause OpenCode Desktop to reinstall or refresh a separate copy under cache.
 - local plugin mode avoids that extra copy and keeps development pointed at this working tree.
+- OpenCode's current plugin docs show local plugins as ESM modules, and this Desktop build imports local path plugins with Node ESM semantics. The explicit package marker keeps `.js` parsing stable instead of inheriting an unrelated package boundary.
+- A valid wrapper is not enough: the wrapper dynamically imports this repo's ESM build, so built runtime files under `dist/services/` must not contain bare CommonJS `require()` calls or static `bun:` imports. On 2026-05-06 the Desktop loader first failed inside `dist/services/sqlite/sqlite-bootstrap.js` because it still used bare `require("bun:sqlite")`; after that was made static ESM, Desktop failed again because Electron/Node's ESM loader rejects the `bun:` protocol. The durable SQLite bootstrap path is runtime selection: `bun:sqlite` under Bun, `node:sqlite` under Desktop's Node runtime.
 
 ### 1.2 Legacy npm/cache plugin behavior
 
@@ -140,10 +150,11 @@ After making changes, verify at least:
 2. Local plugin wrapper still points at this working copy's `dist/index.js`
 3. `~/.config/opencode/opencode.json` does not list `opencode-mem` in the `"plugin"` array
 4. Plugin module can be imported from `dist/plugin.js`
-5. `opencode --print-logs --log-level INFO stats` shows the local wrapper path loading without a plugin export error
-6. A live `opencode .` instance can serve `http://127.0.0.1:4747/api/stats`
-7. Remote embedding mode can return a vector successfully
-8. If local embedding was touched, test first-run local model initialization separately
+5. `npm run check:local-plugin` confirms the wrapper is current, `opencode-mem` is not in the npm plugin array, built runtime service files do not contain bare `require()`, and the built SQLite bootstrap can open an in-memory database under Node
+6. `opencode --print-logs --log-level INFO stats` shows the local wrapper path loading without a plugin export error
+7. A live `opencode .` instance can serve `http://127.0.0.1:4747/api/stats`
+8. Remote embedding mode can return a vector successfully
+9. If local embedding was touched, test first-run local model initialization separately
 
 ### 3.1 Quick Verification By Change Type
 
