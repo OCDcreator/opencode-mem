@@ -7,6 +7,8 @@ import { CONFIG } from "../config.js";
 import type { MemoryType } from "../types/index.js";
 import { userPromptManager } from "./user-prompt/user-prompt-manager.js";
 
+const MAX_SEARCH_PAGE_SIZE = 100;
+
 interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
@@ -73,6 +75,10 @@ function safeJSONParse(jsonString: any): any {
   } catch {
     return undefined;
   }
+}
+
+function normalizePositiveInteger(value: number, fallback: number): number {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
 function extractScopeFromTag(tag: string): { scope: "project"; hash: string } {
@@ -486,6 +492,11 @@ export async function handleSearch(
 ): Promise<ApiResponse<PaginatedResponse<SearchResultItem>>> {
   try {
     if (!query) return { success: false, error: "query is required" };
+    const normalizedPage = normalizePositiveInteger(page, 1);
+    const normalizedPageSize = Math.min(
+      normalizePositiveInteger(pageSize, 20),
+      MAX_SEARCH_PAGE_SIZE
+    );
     await embeddingService.warmup();
     const queryVector = await embeddingService.embedWithTimeout(query);
     let memoryResults: any[] = [];
@@ -495,14 +506,19 @@ export async function handleSearch(
       const shards = shardManager.getAllShards(scope, hash);
       for (const shard of shards) {
         try {
-          const results = await vectorSearch.searchInShard(shard, queryVector, tag, pageSize * 2);
+          const results = await vectorSearch.searchInShard(
+            shard,
+            queryVector,
+            tag,
+            normalizedPageSize * 2
+          );
           memoryResults.push(...results);
         } catch (error) {
           log("Shard search error", { shardId: shard.id, error: String(error) });
         }
       }
       const projectPath = getProjectPathFromTag(tag);
-      promptResults = userPromptManager.searchPrompts(query, projectPath, pageSize * 2);
+      promptResults = userPromptManager.searchPrompts(query, projectPath, normalizedPageSize * 2);
     } else {
       const projectShards = shardManager.getAllShards("project", "");
       const uniqueTags = new Set<string>();
@@ -522,7 +538,7 @@ export async function handleSearch(
               shard,
               queryVector,
               containerTag,
-              pageSize
+              normalizedPageSize
             );
             memoryResults.push(...results);
           } catch (error) {
@@ -530,7 +546,7 @@ export async function handleSearch(
           }
         }
       }
-      promptResults = userPromptManager.searchPrompts(query, undefined, pageSize * 2);
+      promptResults = userPromptManager.searchPrompts(query, undefined, normalizedPageSize * 2);
     }
 
     const formattedPrompts: FormattedPrompt[] = promptResults.map((p) => ({
@@ -570,9 +586,12 @@ export async function handleSearch(
     );
 
     const total = combinedResults.length;
-    const totalPages = Math.ceil(total / pageSize);
-    const offset = (page - 1) * pageSize;
-    const paginatedResults: SearchResultItem[] = combinedResults.slice(offset, offset + pageSize);
+    const totalPages = Math.ceil(total / normalizedPageSize);
+    const offset = (normalizedPage - 1) * normalizedPageSize;
+    const paginatedResults: SearchResultItem[] = combinedResults.slice(
+      offset,
+      offset + normalizedPageSize
+    );
 
     const missingPromptIds = new Set<string>();
     const missingMemoryIds = new Set<string>();
@@ -635,7 +654,16 @@ export async function handleSearch(
       }
     }
 
-    return { success: true, data: { items: paginatedResults, total, page, pageSize, totalPages } };
+    return {
+      success: true,
+      data: {
+        items: paginatedResults,
+        total,
+        page: normalizedPage,
+        pageSize: normalizedPageSize,
+        totalPages,
+      },
+    };
   } catch (error) {
     log("handleSearch: error", { error: String(error) });
     return { success: false, error: String(error) };

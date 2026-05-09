@@ -9,9 +9,24 @@ import type { VectorBackend } from "../vector-backends/types.js";
 
 const Database = getDatabase();
 type DatabaseType = typeof Database.prototype;
+const MIN_SEARCH_CANDIDATES = 100;
+const SEARCH_CANDIDATE_MULTIPLIER = 20;
+const MAX_SEARCH_CANDIDATES = 1000;
 
 function toBlob(vector?: Float32Array): Uint8Array | null {
   return vector ? new Uint8Array(vector.buffer) : null;
+}
+
+function getSearchCandidateLimit(limit: number): number {
+  const resultLimit = Number.isFinite(limit) ? Math.max(Math.floor(limit), 1) : 1;
+  return Math.min(
+    Math.max(resultLimit * SEARCH_CANDIDATE_MULTIPLIER, MIN_SEARCH_CANDIDATES),
+    MAX_SEARCH_CANDIDATES
+  );
+}
+
+function getHydratedResultLimit(limit: number): number {
+  return Number.isFinite(limit) ? Math.max(Math.floor(limit), 0) : 0;
 }
 
 export class VectorSearch {
@@ -79,6 +94,8 @@ export class VectorSearch {
   ): Promise<SearchResult[]> {
     const db = connectionManager.getConnection(shard.dbPath);
     const backend = await this.getBackend();
+    const candidateLimit = getSearchCandidateLimit(limit);
+    const resultLimit = getHydratedResultLimit(limit);
     let contentResults;
     let tagsResults;
 
@@ -91,14 +108,14 @@ export class VectorSearch {
         shard,
         kind: "content",
         queryVector,
-        limit: limit * 4,
+        limit: candidateLimit,
       });
       tagsResults = await backend.search({
         db,
         shard,
         kind: "tags",
         queryVector,
-        limit: limit * 4,
+        limit: candidateLimit,
       });
     } catch (error) {
       log("Vector search degraded to exact scan in shard", {
@@ -114,14 +131,14 @@ export class VectorSearch {
         shard,
         kind: "content",
         queryVector,
-        limit: limit * 4,
+        limit: candidateLimit,
       });
       tagsResults = await this.fallbackBackend.search({
         db,
         shard,
         kind: "tags",
         queryVector,
-        limit: limit * 4,
+        limit: candidateLimit,
       });
     }
 
@@ -168,7 +185,12 @@ export class VectorSearch {
     const hydratedResults = rows.map((row: any) => {
       const scores = scoreMap.get(row.id)!;
       const memoryTagsStr = row.tags || "";
-      const memoryTags = memoryTagsStr.split(",").map((t: string) => t.trim().toLowerCase());
+      const memoryTags = memoryTagsStr
+        ? memoryTagsStr
+            .split(",")
+            .map((t: string) => t.trim().toLowerCase())
+            .filter((t: string) => t.length > 0)
+        : [];
 
       let exactMatchBoost = 0;
       if (queryWords.length > 0 && memoryTags.length > 0) {
@@ -199,7 +221,7 @@ export class VectorSearch {
     });
 
     hydratedResults.sort((a, b) => b.similarity - a.similarity);
-    return hydratedResults;
+    return hydratedResults.slice(0, resultLimit);
   }
 
   async searchAcrossShards(

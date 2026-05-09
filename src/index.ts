@@ -388,7 +388,7 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
     tool: {
       memory: tool({
-        description: `Manage and query project memory (MATCH USER LANGUAGE: ${getLanguageName(CONFIG.autoCaptureLanguage || "en")}). Use 'search' with technical keywords/tags, 'add' to store knowledge, 'profile' for preferences. Search/list scope: project or all-projects.`,
+        description: `Project memory and user preference tool (MATCH USER LANGUAGE: ${getLanguageName(CONFIG.autoCaptureLanguage || "en")}). Search before answering questions about prior technical context, project history, past decisions, repeated issues, or user phrasing such as "before", "previous", "remember", "以前", "之前", or "记得". Use mode='search' with concise technical keywords/tags; list returns recent memories, not the most relevant memories. If project search has no useful result, retry with scope='all-projects' or alternate keywords. Use mode='add' only to store durable knowledge, and mode='profile' for user preferences.`,
         args: {
           mode: tool.schema.enum(["add", "search", "profile", "list", "forget", "help"]).optional(),
           content: tool.schema.string().optional(),

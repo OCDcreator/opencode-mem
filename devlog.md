@@ -3,6 +3,58 @@
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
 > 当前最新更新：2026-05-09
 
+## 2026-05-09 — Fix Memory Search Recall, Empty Tag Boosting, And Tool Guidance
+
+### Changed files
+
+| File                                                | Change                                                                                  |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `src/services/sqlite/vector-search.ts`              | Expand internal candidate recall, cap large limits, trim empty tags, and final-slice results |
+| `src/services/api-handlers.ts`                      | Normalize Web/API search `page` and cap `pageSize` at 100                               |
+| `src/index.ts`                                      | Strengthen the `memory` tool description with explicit search triggers                  |
+| `tests/vector-search-backend-integration.test.ts`   | Add regression coverage for empty tags, candidate limits, fallback search, caps, and final slicing |
+| `tests/tool-scope.test.ts`                          | Assert the tool description tells agents to search prior technical context              |
+| `ISSUES.md`                                        | Mark completed portions and keep scope/system-hook/migration topics as follow-up work    |
+
+### 1. Search behavior
+
+The vector search path now recalls a larger internal candidate pool:
+
+- minimum 100 candidates
+- `limit * 20` for normal searches
+- hard cap at 1000 candidates
+
+`searchInShard` now also slices hydrated results back to the requested `limit`.
+This keeps direct Web/API callers from receiving hundreds of results per shard
+after the larger internal recall.
+
+### 2. Empty tag handling
+
+Tag parsing now filters empty tag fragments before exact-match boosting. This
+prevents `null`, empty, comma-only, or whitespace-only tags from acting like a
+universal match because every query string includes `""`.
+
+### 3. Agent guidance
+
+The `memory` tool description now tells agents to search project memory before
+answering questions about prior technical context, project history, past
+decisions, repeated issues, or phrases like "之前", "以前", "记得",
+"before", "previous", and "remember". It also clarifies that `list` returns
+recent memories rather than the most relevant memories.
+
+### 4. Review and validation
+
+Validation and review completed with:
+
+- `bun test tests/vector-search-backend-integration.test.ts tests/tool-scope.test.ts`
+- `bun run typecheck`
+- `bun run build`
+- `opencode run --dir "/Volumes/SDD2T/obsidian-vault-write/custom-project/opencode-mem" "...审查当前未提交改动..."`
+- second `opencode`复审 after addressing the first review's cap/slicing feedback
+
+The second `opencode` review reported that the prior findings were resolved and
+there were no remaining must-fix bugs.
+
 ## 2026-05-09 — Absorb Upstream 2.14 Provider And Embedding Fixes, Upgrade SDK, And Restore Full Test Pass
 
 ### Changed files

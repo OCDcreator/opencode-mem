@@ -25,6 +25,43 @@ function createFailingBackend(): VectorBackend {
   };
 }
 
+function createSearchLimitRecorder(recordedLimits: number[]): VectorBackend {
+  return {
+    getBackendName: () => "recorder",
+    insert: async () => {},
+    insertBatch: async () => {},
+    delete: async () => {},
+    search: async (args) => {
+      recordedLimits.push(args.limit);
+      return [];
+    },
+    rebuildFromShard: async () => {},
+    deleteShardIndexes: async () => {},
+  };
+}
+
+function createSingleContentResultBackend(id: string, contentSim: number): VectorBackend {
+  return createContentResultsBackend([{ id, contentSim }]);
+}
+
+function createContentResultsBackend(results: { id: string; contentSim: number }[]): VectorBackend {
+  return {
+    getBackendName: () => "content-results",
+    insert: async () => {},
+    insertBatch: async () => {},
+    delete: async () => {},
+    search: async (args) =>
+      args.kind === "content"
+        ? results.map((result) => ({
+            id: result.id,
+            distance: 1 - result.contentSim,
+          }))
+        : [],
+    rebuildFromShard: async () => {},
+    deleteShardIndexes: async () => {},
+  };
+}
+
 describe("vector search backend integration", () => {
   const tempDirs: string[] = [];
 
@@ -193,5 +230,327 @@ describe("vector search backend integration", () => {
 
     expect(results.map((r) => r.id)).toEqual(["a", "b"]);
     expect(typeof results[0]?.similarity).toBe("number");
+  });
+
+  it("does not boost memories with empty tags as exact tag matches", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vector-search-empty-tags-"));
+    tempDirs.push(tempDir);
+    const dbPath = join(tempDir, "test.db");
+    const db = new Database(dbPath);
+
+    db.run(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        vector BLOB NOT NULL,
+        tags_vector BLOB,
+        container_tag TEXT NOT NULL,
+        tags TEXT,
+        type TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        metadata TEXT,
+        display_name TEXT,
+        user_name TEXT,
+        user_email TEXT,
+        project_path TEXT,
+        project_name TEXT,
+        git_repo_url TEXT,
+        is_pinned INTEGER DEFAULT 0
+      )
+    `);
+
+    const shard = {
+      id: 1,
+      scope: "project" as const,
+      scopeHash: "hash",
+      shardIndex: 0,
+      dbPath,
+      vectorCount: 1,
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    const insert = db.prepare(
+      `INSERT INTO memories (id, content, vector, container_tag, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    insert.run(
+      "tagless",
+      "tagless memory",
+      new Uint8Array(new Float32Array([1, 0, 0, 0]).buffer),
+      "opencode_project_hash",
+      null,
+      Date.now(),
+      Date.now()
+    );
+    insert.run(
+      "commas",
+      "comma-only tags memory",
+      new Uint8Array(new Float32Array([1, 0, 0, 0]).buffer),
+      "opencode_project_hash",
+      ",,,",
+      Date.now(),
+      Date.now()
+    );
+    insert.run(
+      "spaces",
+      "space-only tags memory",
+      new Uint8Array(new Float32Array([1, 0, 0, 0]).buffer),
+      "opencode_project_hash",
+      "   ",
+      Date.now(),
+      Date.now()
+    );
+
+    const vectorSearch = new VectorSearch(
+      createContentResultsBackend([
+        { id: "tagless", contentSim: 0.5 },
+        { id: "commas", contentSim: 0.5 },
+        { id: "spaces", contentSim: 0.5 },
+      ])
+    );
+
+    const results = await vectorSearch.searchInShard(
+      shard,
+      new Float32Array([1, 0, 0, 0]),
+      "opencode_project_hash",
+      10,
+      "alpha"
+    );
+
+    expect(results).toHaveLength(3);
+    for (const result of results) {
+      expect(result.tags.filter((tag) => tag.trim().length > 0)).toEqual([]);
+      expect(result.similarity).toBeCloseTo(0.3, 5);
+    }
+  });
+
+  it("requests a wider candidate pool than the final result limit", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vector-search-candidate-limit-"));
+    tempDirs.push(tempDir);
+    const dbPath = join(tempDir, "test.db");
+    const db = new Database(dbPath);
+
+    db.run(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        vector BLOB NOT NULL,
+        tags_vector BLOB,
+        container_tag TEXT NOT NULL,
+        tags TEXT,
+        type TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        metadata TEXT,
+        display_name TEXT,
+        user_name TEXT,
+        user_email TEXT,
+        project_path TEXT,
+        project_name TEXT,
+        git_repo_url TEXT,
+        is_pinned INTEGER DEFAULT 0
+      )
+    `);
+
+    const recordedLimits: number[] = [];
+    const vectorSearch = new VectorSearch(createSearchLimitRecorder(recordedLimits));
+    const shard = {
+      id: 1,
+      scope: "project" as const,
+      scopeHash: "hash",
+      shardIndex: 0,
+      dbPath,
+      vectorCount: 120,
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    await vectorSearch.searchInShard(
+      shard,
+      new Float32Array([1, 0, 0, 0]),
+      "opencode_project_hash",
+      10,
+      "alpha"
+    );
+
+    expect(recordedLimits).toEqual([200, 200]);
+  });
+
+  it("uses the wider candidate pool for fallback search", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vector-search-fallback-candidate-limit-"));
+    tempDirs.push(tempDir);
+    const dbPath = join(tempDir, "test.db");
+    const db = new Database(dbPath);
+
+    db.run(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        vector BLOB NOT NULL,
+        tags_vector BLOB,
+        container_tag TEXT NOT NULL,
+        tags TEXT,
+        type TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        metadata TEXT,
+        display_name TEXT,
+        user_name TEXT,
+        user_email TEXT,
+        project_path TEXT,
+        project_name TEXT,
+        git_repo_url TEXT,
+        is_pinned INTEGER DEFAULT 0
+      )
+    `);
+
+    const recordedLimits: number[] = [];
+    const vectorSearch = new VectorSearch(
+      createFailingBackend(),
+      createSearchLimitRecorder(recordedLimits)
+    );
+    const shard = {
+      id: 1,
+      scope: "project" as const,
+      scopeHash: "hash",
+      shardIndex: 0,
+      dbPath,
+      vectorCount: 120,
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    await vectorSearch.searchInShard(
+      shard,
+      new Float32Array([1, 0, 0, 0]),
+      "opencode_project_hash",
+      10,
+      "alpha"
+    );
+
+    expect(recordedLimits).toEqual([200, 200]);
+  });
+
+  it("caps the internal candidate pool for large result limits", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vector-search-candidate-cap-"));
+    tempDirs.push(tempDir);
+    const dbPath = join(tempDir, "test.db");
+    const db = new Database(dbPath);
+
+    db.run(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        vector BLOB NOT NULL,
+        tags_vector BLOB,
+        container_tag TEXT NOT NULL,
+        tags TEXT,
+        type TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        metadata TEXT,
+        display_name TEXT,
+        user_name TEXT,
+        user_email TEXT,
+        project_path TEXT,
+        project_name TEXT,
+        git_repo_url TEXT,
+        is_pinned INTEGER DEFAULT 0
+      )
+    `);
+
+    const recordedLimits: number[] = [];
+    const vectorSearch = new VectorSearch(createSearchLimitRecorder(recordedLimits));
+    const shard = {
+      id: 1,
+      scope: "project" as const,
+      scopeHash: "hash",
+      shardIndex: 0,
+      dbPath,
+      vectorCount: 10000,
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    await vectorSearch.searchInShard(
+      shard,
+      new Float32Array([1, 0, 0, 0]),
+      "opencode_project_hash",
+      10000,
+      "alpha"
+    );
+
+    expect(recordedLimits).toEqual([1000, 1000]);
+  });
+
+  it("returns no more hydrated results than the requested limit", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "vector-search-final-limit-"));
+    tempDirs.push(tempDir);
+    const dbPath = join(tempDir, "test.db");
+    const db = new Database(dbPath);
+
+    db.run(`
+      CREATE TABLE memories (
+        id TEXT PRIMARY KEY,
+        content TEXT NOT NULL,
+        vector BLOB NOT NULL,
+        tags_vector BLOB,
+        container_tag TEXT NOT NULL,
+        tags TEXT,
+        type TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        metadata TEXT,
+        display_name TEXT,
+        user_name TEXT,
+        user_email TEXT,
+        project_path TEXT,
+        project_name TEXT,
+        git_repo_url TEXT,
+        is_pinned INTEGER DEFAULT 0
+      )
+    `);
+
+    const insert = db.prepare(
+      `INSERT INTO memories (id, content, vector, container_tag, tags, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    );
+    const backendResults: { id: string; contentSim: number }[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      const id = `memory-${i}`;
+      insert.run(
+        id,
+        `memory ${i}`,
+        new Uint8Array(new Float32Array([1, 0, 0, 0]).buffer),
+        "opencode_project_hash",
+        "alpha",
+        Date.now(),
+        Date.now()
+      );
+      backendResults.push({ id, contentSim: 0.9 - i * 0.01 });
+    }
+
+    const vectorSearch = new VectorSearch(createContentResultsBackend(backendResults));
+    const shard = {
+      id: 1,
+      scope: "project" as const,
+      scopeHash: "hash",
+      shardIndex: 0,
+      dbPath,
+      vectorCount: 6,
+      isActive: true,
+      createdAt: Date.now(),
+    };
+
+    const results = await vectorSearch.searchInShard(
+      shard,
+      new Float32Array([1, 0, 0, 0]),
+      "opencode_project_hash",
+      3,
+      "alpha"
+    );
+
+    expect(results).toHaveLength(3);
+    expect(results.map((result) => result.id)).toEqual(["memory-0", "memory-1", "memory-2"]);
   });
 });

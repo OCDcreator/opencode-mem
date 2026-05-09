@@ -109,6 +109,7 @@ await memoryTool.execute(${JSON.stringify(input.args)}, { sessionID: "s1" });
 
 console.log(
   JSON.stringify({
+    toolDescription: memoryTool.description,
     searchScope: searchCalls[0]?.[2],
     listScope: lastListScope,
   })
@@ -165,5 +166,20 @@ describe("tool memory scope", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.parsed?.listScope).toBe("project");
+  });
+
+  it("guides agents to search project memory for prior technical context", () => {
+    const result = runScenario({
+      args: { mode: "help" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.parsed?.toolDescription).toContain(
+      "Search before answering questions about prior technical context"
+    );
+    expect(result.parsed?.toolDescription).toContain(
+      "list returns recent memories, not the most relevant memories"
+    );
   });
 });
