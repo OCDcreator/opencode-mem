@@ -1,14 +1,26 @@
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
-import { execSync } from "node:child_process";
-import { getProjectTagInfo } from "../src/services/tags.js";
 
 const createdDirs: string[] = [];
 
+async function loadTags() {
+  return import(`../src/services/tags.js?project-scope=${Date.now()}-${Math.random()}`);
+}
+
 function run(command: string, cwd: string): void {
-  execSync(command, { cwd, stdio: "pipe" });
+  const result = Bun.spawnSync({
+    cmd: ["sh", "-c", command],
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  if (result.exitCode !== 0) {
+    const stderr = Buffer.from(result.stderr).toString("utf8").trim();
+    throw new Error(`Command failed: ${command}\n${stderr}`);
+  }
 }
 
 function createRepoWithWorktree(): { repoDir: string; worktreeDir: string } {
@@ -40,8 +52,13 @@ afterEach(() => {
   }
 });
 
+beforeEach(() => {
+  mock.restore();
+});
+
 describe("project scope identity", () => {
-  it("uses one project tag across worktrees in the same repo", () => {
+  it("uses one project tag across worktrees in the same repo", async () => {
+    const { getProjectTagInfo } = await loadTags();
     const { repoDir, worktreeDir } = createRepoWithWorktree();
 
     const mainTag = getProjectTagInfo(repoDir);
@@ -52,7 +69,8 @@ describe("project scope identity", () => {
     expect(mainTag.projectName).toBe(basename(repoDir));
   });
 
-  it("uses different project tags for unrelated non-git directories", () => {
+  it("uses different project tags for unrelated non-git directories", async () => {
+    const { getProjectTagInfo } = await loadTags();
     const left = mkdtempSync(join(tmpdir(), "opencode-mem-left-"));
     const right = mkdtempSync(join(tmpdir(), "opencode-mem-right-"));
     createdDirs.push(left, right);
@@ -63,7 +81,8 @@ describe("project scope identity", () => {
     expect(leftTag.tag).not.toBe(rightTag.tag);
   });
 
-  it("uses the same project tag from nested paths inside the same repo", () => {
+  it("uses the same project tag from nested paths inside the same repo", async () => {
+    const { getProjectTagInfo } = await loadTags();
     const { repoDir } = createRepoWithWorktree();
     const nestedDir = join(repoDir, "src", "features", "memory");
     mkdirSync(nestedDir, { recursive: true });

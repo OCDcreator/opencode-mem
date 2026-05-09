@@ -1,7 +1,6 @@
 import { describe, it, expect } from "bun:test";
 import { getProjectName } from "../src/services/tags.js";
-import { dirname } from "node:path";
-import { join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 
 describe("Windows Path Handling", () => {
   describe("getProjectName", () => {
@@ -50,7 +49,7 @@ describe("Windows Path Handling", () => {
   describe("dirname for database path", () => {
     it("should extract directory correctly from Windows path", () => {
       const dbPath = "C:\\Users\\user\\.opencode-mem\\shards\\project.db";
-      const dir = dirname(dbPath);
+      const dir = win32.dirname(dbPath);
       expect(dir).toBe("C:\\Users\\user\\.opencode-mem\\shards");
     });
 

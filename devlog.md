@@ -1,7 +1,94 @@
 # Development Log
 
 > **更新规范**：后续更新请写在文件开头，越新的进度越靠前（倒序排列）。
-> 当前最新更新：2026-04-16
+> 当前最新更新：2026-05-09
+
+## 2026-05-09 — Absorb Upstream 2.14 Provider And Embedding Fixes, Upgrade SDK, And Restore Full Test Pass
+
+### Changed files
+
+| File                                                | Change                                                                                                   |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `package.json`                                      | Bump fork version to `2.14.1`, upgrade direct `@opencode-ai/sdk` to `^1.14.41`, remove unused AI SDK deps |
+| `bun.lock`                                          | Refresh lockfile for SDK upgrade and dependency removal                                                  |
+| `src/services/embedding.ts`                         | Force ONNX WASM single-threading and `dtype: "q8"` for local transformers pipeline initialization         |
+| `src/services/ai/opencode-provider.ts`              | Add OpenCode v2 `session.prompt` structured-output path while preserving direct config fallback           |
+| `src/index.ts`                                      | Initialize the v2 OpenCode client from `ctx.serverUrl` during plugin startup                             |
+| `src/config.ts` / `README.md`                       | Document OpenCode-routed providers including GitHub Copilot                                              |
+| `src/services/tags.ts`                              | Make project-name extraction handle Windows backslash paths on POSIX hosts                               |
+| `tests/opencode-provider.test.ts`                   | Replace old direct AI SDK tests with v2 session lifecycle and fallback coverage                           |
+| `tests/embedding-transformers-options.test.ts`      | Add regression coverage for `dtype: "q8"` and ONNX WASM `numThreads = 1`                                  |
+| `tests/profile-tool-runtime.test.ts`                | Avoid leaking a `node:child_process` mock into later full-suite tests                                     |
+| `tests/project-scope.test.ts` / `tests/windows-path.test.ts` | Remove full-suite order and POSIX/Windows path assumptions from tests                              |
+| `docs/agent-reference/upstream-sync-log.md`         | Advance upstream cursor to `a06a200` and record the hybrid absorption strategy                            |
+| `docs/agent-reference/upstream-merge-evaluation-2026-05-09.md` | Update the evaluation from "defer" to completed hybrid absorption                              |
+
+### 1. Upstream review result
+
+This pass reviewed upstream changes from `40508eb` through `a06a200`
+(`v2.14.0`) and absorbed the parts that add value to this fork.
+
+Absorbed manually:
+
+- `f455c8e` / `9e50c26`
+  - prevent local transformers pipeline hangs in Node/Bun by setting ONNX WASM
+    `numThreads = 1`
+  - force quantized `dtype: "q8"` pipeline options with proper
+    `PretrainedModelOptions` typing
+- `8c5d5a0`
+  - add OpenCode v2 SDK `session.prompt` structured-output support
+  - keep the fork's direct provider/config fallback instead of replacing it
+    outright
+
+Skipped:
+
+- merge commits `675813c` / `1269947`
+- upstream patch version bump `a06a200`, because the fork now follows upstream
+  major/minor and uses its own patch version, so the local version is `2.14.1`
+
+### 2. SDK and provider behavior
+
+The direct `@opencode-ai/sdk` dependency is now `^1.14.41`, which exposes
+`@opencode-ai/sdk/v2/client`.
+
+The provider path now works in two layers:
+
+- if a v2 client is initialized and the configured provider is connected, use
+  OpenCode's `session.prompt` with `format: { type: "json_schema" }`
+- if v2 is unavailable, disconnected, or fails, fall back to the fork's direct
+  config resolution path
+
+This preserves local/Desktop plugin compatibility while enabling OpenCode
+provider routing for providers such as GitHub Copilot.
+
+### 3. Full-suite repair
+
+The broader `bun test` run exposed two unrelated test fragilities that were
+fixed in the same pass so the repo is left in a cleaner state:
+
+- `tests/profile-tool-runtime.test.ts` no longer mocks the Node built-in
+  `node:child_process`, which had leaked into `tests/project-scope.test.ts`
+  under full-suite execution
+- `getProjectName()` now handles Windows backslash paths on macOS/POSIX hosts,
+  and the Windows `dirname` test uses `path.win32.dirname`
+
+### 4. Validation
+
+Verified locally with:
+
+- `bun install`
+- `bun run typecheck`
+- `bun run build`
+- `bun test tests/profile-tool-runtime.test.ts tests/project-scope.test.ts tests/tags.test.ts tests/windows-path.test.ts`
+- `bun test tests/embedding-transformers-options.test.ts tests/vector-search-backend-integration.test.ts tests/vector-backends/*.test.ts tests/opencode-provider.test.ts tests/opencode-provider-config-resolution.test.ts`
+- `bun test`
+
+Results:
+
+- dependency install and lockfile refresh succeeded
+- typecheck and build passed
+- targeted provider, embedding, vector backend, Windows path, and project-scope tests passed
+- full test suite passed
 
 ## 2026-04-16 — Add Upstream Sync Ledger, Merge `.sisyphus` Ignore, And Derive Plugin Id From Package Name
 

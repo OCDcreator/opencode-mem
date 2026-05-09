@@ -1,17 +1,25 @@
 import { CONFIG } from "../config.js";
 import { log } from "./logger.js";
 import { join } from "node:path";
+import type { PretrainedModelOptions } from "@huggingface/transformers";
 
 const TIMEOUT_MS = 30000;
 const GLOBAL_EMBEDDING_KEY = Symbol.for("opencode-mem.embedding.instance");
 const MAX_CACHE_SIZE = 100;
 
 type TransformersModule = {
-  pipeline: (task: string, model: string, options?: Record<string, unknown>) => Promise<any>;
+  pipeline: (task: string, model: string, options?: PretrainedModelOptions) => Promise<any>;
   env: {
     allowLocalModels: boolean;
     allowRemoteModels: boolean;
     cacheDir: string;
+    backends?: {
+      onnx?: {
+        wasm?: {
+          numThreads?: number;
+        };
+      };
+    };
   };
 };
 
@@ -64,6 +72,7 @@ export class EmbeddingService {
       const { pipeline } = await this.getTransformers();
       this.pipe = await pipeline("feature-extraction", CONFIG.embeddingModel, {
         progress_callback: progressCallback,
+        dtype: "q8",
       });
       this.isWarmedUp = true;
     } catch (error) {
@@ -140,6 +149,14 @@ export class EmbeddingService {
           transformers.env.allowLocalModels = true;
           transformers.env.allowRemoteModels = true;
           transformers.env.cacheDir = join(CONFIG.storagePath, ".cache");
+          try {
+            const wasm = transformers.env.backends?.onnx?.wasm;
+            if (wasm) {
+              wasm.numThreads = 1;
+            }
+          } catch (error) {
+            log("Failed to set ONNX wasm numThreads", { error: String(error) });
+          }
           return transformers;
         })
         .catch((error) => {

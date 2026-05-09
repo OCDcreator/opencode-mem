@@ -123,9 +123,8 @@ export function getProjectIdentity(directory: string): string {
 }
 
 export function getProjectName(directory: string): string {
-  // Normalize path to handle both Unix and Windows separators
-  const normalized = normalize(directory);
-  const parts = normalized.split(sep).filter((p) => p);
+  const normalized = normalize(directory).replace(/\\/g, "/");
+  const parts = normalized.split("/").filter((p) => p);
   return parts[parts.length - 1] || directory;
 }
 

@@ -170,6 +170,9 @@ export const OpenCodeMemPlugin: Plugin = async (ctx: PluginInput) => {
 
     void (async () => {
       try {
+        const { createV2Client, setV2Client } = await import("./services/ai/opencode-provider.js");
+        setV2Client(createV2Client(ctx.serverUrl));
+
         const pathResult = await ctx.client.path.get();
         if (pathResult.data?.state) {
           setStatePath(pathResult.data.state);

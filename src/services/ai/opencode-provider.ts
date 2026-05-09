@@ -2,7 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
+import { createOpencodeClient, type OpencodeClient } from "@opencode-ai/sdk/v2/client";
 import { stripJsoncComments } from "../jsonc.js";
 import { log } from "../logger.js";
 export {
@@ -13,7 +14,22 @@ export {
   setConfigPath,
   setStatePath,
 } from "./opencode-state.js";
-import { getConfigPath } from "./opencode-state.js";
+import { getConfigPath, isProviderConnected } from "./opencode-state.js";
+
+let _v2Client: OpencodeClient | undefined;
+
+export function createV2Client(serverUrl: URL | string): OpencodeClient {
+  const baseUrl = typeof serverUrl === "string" ? serverUrl : serverUrl.toString();
+  return createOpencodeClient({ baseUrl });
+}
+
+export function setV2Client(client: OpencodeClient | undefined): void {
+  _v2Client = client;
+}
+
+export function getV2Client(): OpencodeClient | undefined {
+  return _v2Client;
+}
 
 interface OpencodeProviderConfig {
   npm?: string;
@@ -376,7 +392,7 @@ async function callAnthropic<T>(options: {
   return options.schema.parse(JSON.parse(extractJsonString(content)));
 }
 
-export async function generateStructuredOutput<T>(options: {
+interface DirectStructuredOutputOptions<T> {
   providerName: string;
   modelId: string;
   statePath?: string;
@@ -384,7 +400,116 @@ export async function generateStructuredOutput<T>(options: {
   userPrompt: string;
   schema: ZodType<T>;
   temperature?: number;
-}): Promise<T> {
+  directory?: string;
+  retryCount?: number;
+}
+
+interface V2StructuredOutputOptions<T> {
+  client: OpencodeClient;
+  providerID: string;
+  modelID: string;
+  systemPrompt: string;
+  userPrompt: string;
+  schema: ZodType<T>;
+  directory?: string;
+  retryCount?: number;
+}
+
+type StructuredOutputOptions<T> = DirectStructuredOutputOptions<T> | V2StructuredOutputOptions<T>;
+
+function isV2Options<T>(options: StructuredOutputOptions<T>): options is V2StructuredOutputOptions<T> {
+  return "client" in options;
+}
+
+function toJsonSchema<T>(schema: ZodType<T>): Record<string, unknown> {
+  const instanceSchema = (
+    schema as unknown as {
+      toJSONSchema?: () => Record<string, unknown>;
+    }
+  ).toJSONSchema?.();
+
+  if (instanceSchema) {
+    return instanceSchema;
+  }
+
+  return z.toJSONSchema(schema) as Record<string, unknown>;
+}
+
+async function generateStructuredOutputViaV2<T>(
+  options: V2StructuredOutputOptions<T>
+): Promise<T> {
+  const { client, providerID, modelID, systemPrompt, userPrompt, schema, directory, retryCount } =
+    options;
+
+  const created = await client.session.create({
+    title: "opencode-mem capture",
+    ...(directory ? { directory } : {}),
+  });
+  const sessionID = (created as { data?: { id?: string } })?.data?.id;
+  if (!sessionID) {
+    throw new Error(
+      "opencode-mem: session.create returned no session id; cannot generate structured output"
+    );
+  }
+
+  try {
+    const promptResult = await client.session.prompt({
+      sessionID,
+      ...(directory ? { directory } : {}),
+      model: { providerID, modelID },
+      system: systemPrompt,
+      parts: [{ type: "text", text: userPrompt }],
+      format: {
+        type: "json_schema",
+        schema: toJsonSchema(schema),
+        ...(retryCount !== undefined ? { retryCount } : {}),
+      },
+      noReply: true,
+    });
+
+    const data = (
+      promptResult as {
+        data?: {
+          info?: {
+            structured?: unknown;
+            error?: { name: string; data?: { message?: string } };
+          };
+        };
+      }
+    ).data;
+
+    const info = data?.info;
+    if (!info) {
+      throw new Error("opencode-mem: prompt response missing `info`");
+    }
+
+    if (info.error) {
+      const msg = info.error.data?.message ?? info.error.name;
+      throw new Error(`opencode-mem: opencode reported ${info.error.name}: ${msg}`);
+    }
+
+    if (info.structured === undefined || info.structured === null) {
+      throw new Error(
+        "opencode-mem: opencode returned no structured output (info.structured was empty)"
+      );
+    }
+
+    return schema.parse(info.structured);
+  } finally {
+    try {
+      await client.session.delete({
+        sessionID,
+        ...(directory ? { directory } : {}),
+      });
+    } catch {
+      // Best effort cleanup: capture result/errors should not be masked by session deletion.
+    }
+  }
+}
+
+async function generateStructuredOutputDirect<T>(
+  options: DirectStructuredOutputOptions<T>
+): Promise<T> {
   const provider = getProviderConfig(options.statePath, options.providerName);
   const providerKind = inferProviderKind(options.providerName, provider);
   log("OpencodeProvider: generate structured output", {
@@ -411,4 +536,46 @@ export async function generateStructuredOutput<T>(options: {
     });
     throw error;
   }
+}
+
+export async function generateStructuredOutput<T>(
+  options: StructuredOutputOptions<T>
+): Promise<T> {
+  if (isV2Options(options)) {
+    return generateStructuredOutputViaV2(options);
+  }
+
+  const client = getV2Client();
+  if (client && isProviderConnected(options.providerName)) {
+    try {
+      return await generateStructuredOutputViaV2({
+        client,
+        providerID: options.providerName,
+        modelID: options.modelId,
+        systemPrompt: options.systemPrompt,
+        userPrompt: options.userPrompt,
+        schema: options.schema,
+        directory: options.directory,
+        retryCount: options.retryCount,
+      });
+    } catch (error) {
+      log("OpencodeProvider: v2 structured output failed; trying direct config fallback", {
+        providerName: options.providerName,
+        modelId: options.modelId,
+        error: String(error),
+      });
+      try {
+        return await generateStructuredOutputDirect(options);
+      } catch (fallbackError) {
+        log("OpencodeProvider: direct config fallback failed after v2 failure", {
+          providerName: options.providerName,
+          modelId: options.modelId,
+          error: String(fallbackError),
+        });
+        throw error;
+      }
+    }
+  }
+
+  return generateStructuredOutputDirect(options);
 }

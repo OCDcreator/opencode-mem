@@ -143,16 +143,16 @@ memory({ mode: "list", limit: 10 });
 
 ### 自动采集使用的 AI Provider
 
-**推荐方式：** 直接使用 OpenCode 已配置好的 provider，不需要再单独配置 API Key：
+**推荐方式：** 直接使用 OpenCode 已认证的任意 provider，不需要在本插件里再单独配置 API Key：
 
 ```jsonc
 "opencodeProvider": "anthropic",
 "opencodeModel": "claude-haiku-4-5-20251001",
 ```
 
-这会直接复用你现有的 OpenCode 认证（OAuth 或 API Key）。如果你在 OpenCode 中使用 Claude Pro / Max 的 OAuth 登录，也不需要额外再填单独的 API Key。
+插件会通过 OpenCode 的 `session.prompt` 结构化输出接口请求模型，而不是自己直连 provider HTTP endpoint，所以认证、token refresh、provider routing 都交给 OpenCode 处理。你在 OpenCode 里配置好的 Claude Pro / Max OAuth、GitHub Copilot 个人或企业账号、OpenAI / Anthropic API Key、自定义 provider 都可以复用。
 
-支持的 provider：`anthropic`、`openai`
+支持的 provider：`opencode providers list` 返回的任意 provider，例如 `anthropic`、`openai`、`github-copilot`。
 
 **回退方案：** 如果你不使用 `opencodeProvider`，也可以手动配置 API：
 

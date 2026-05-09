@@ -27,6 +27,57 @@ Working rule:
 - after each upstream review pass, append a new entry at the top and advance the cursor
 - if a commit was not cherry-picked verbatim, record whether it was manually absorbed or already covered by fork-specific work
 
+## 2026-05-09 — Review upstream changes through `a06a200`
+
+### Review window
+
+- previous reviewed upstream commit: `40508eb` (`2026-04-15`, `fix(embedding): migrate from @xenova/transformers to @huggingface/transformers (#90)`)
+- reviewed through upstream commit: `a06a200` (`2026-05-09`, tag `v2.14.0`)
+- local branch reviewed: `main`
+- local fork version after this pass: `2.14.1`
+
+### Manually absorbed in this pass
+
+- `f455c8e` / `9e50c26` `fix(embedding): prevent pipeline() hang and add type safety`
+  - manually ported because local `src/services/embedding.ts` structure differs from upstream
+  - set ONNX WASM `numThreads = 1` during transformers setup
+  - pass typed `dtype: "q8"` pipeline options to prefer quantized ONNX weights and avoid fp32 model fetches
+
+- `8c5d5a0` `refactor(ai): use opencode v2 SDK session.prompt for structured output`
+  - manually absorbed as a fork-specific hybrid instead of a direct replacement
+  - upgraded direct `@opencode-ai/sdk` dependency to `^1.14.41`
+  - added `createV2Client`, `setV2Client`, `getV2Client`, transient-session `session.prompt` structured output, and session cleanup
+  - wired the v2 client from `ctx.serverUrl` during plugin initialization
+  - preserved the fork's direct opencode config fallback for local/Desktop stability when the provider is not connected, the v2 client is not initialized, or the v2 path fails
+  - removed now-unused direct AI SDK dependencies: `@ai-sdk/anthropic`, `@ai-sdk/openai`, and `ai`
+  - documented `github-copilot` and other OpenCode-routed providers as supported through opencode provider routing
+
+### Already covered before this pass
+
+- `20748be` `fix(api): remove embedding warmup from read-only handlers`
+  - fork already avoided embedding warmup in `handleListTags`, `handleListMemories`, and `handleStats`
+  - `handleSearch`, add, and update paths still warm up embeddings because they need vectors
+
+### Skipped
+
+- `675813c` / `1269947` merge commits
+- `a06a200` upstream version bump to `2.14.0`
+  - fork follows upstream major/minor but uses its own patch version for local changes, so this pass sets `package.json` to `2.14.1`
+
+### Verification
+
+- `bun run typecheck`
+- `bun run build`
+- `bun test tests/embedding-transformers-options.test.ts`
+- `bun test tests/opencode-provider.test.ts tests/opencode-provider-config-resolution.test.ts`
+- `bun test tests/embedding-transformers-options.test.ts tests/vector-search-backend-integration.test.ts tests/vector-backends/*.test.ts tests/opencode-provider.test.ts tests/opencode-provider-config-resolution.test.ts`
+- `bun test`
+
+### Notes
+
+- Future upstream-sync comparisons should start from `a06a200` unless a full historical audit is explicitly requested.
+- The direct dependency `@opencode-ai/sdk@1.14.41` provides `@opencode-ai/sdk/v2/client`; `@opencode-ai/plugin@1.3.13` still carries its own nested SDK dependency, but the plugin's direct import resolves to the upgraded SDK.
+
 ## 2026-04-16 — Review upstream changes through `40508eb`
 
 ### Review window
